@@ -3,6 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcryptjs';
 import { UsersService } from '../users/users.service';
+import { EmailService } from '../email/email.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { Role } from '../common/enums/role.enum';
@@ -13,11 +14,15 @@ export class AuthService {
     private usersService: UsersService,
     private jwtService: JwtService,
     private configService: ConfigService,
+    private emailService: EmailService,
   ) {}
 
   async register(registerDto: RegisterDto) {
     const user = await this.usersService.create(registerDto);
     const tokens = await this.generateTokens(user.id, user.email, user.role);
+
+    this.emailService.sendWelcome({ name: user.name, email: user.email });
+
     return { user: this.sanitizeUser(user), ...tokens };
   }
 
@@ -70,6 +75,20 @@ export class AuthService {
     } catch {
       throw new UnauthorizedException('Invalid refresh token');
     }
+  }
+
+  async forgotPassword(email: string): Promise<void> {
+    const result = await this.usersService.createPasswordResetToken(email);
+    if (!result) return; // don't reveal whether email exists
+
+    const clientUrl = this.configService.get('CLIENT_URL', 'https://www.bhavanipickles.com');
+    const resetUrl = `${clientUrl}/auth/reset-password?token=${result.token}`;
+
+    this.emailService.sendPasswordReset({ name: result.name, email, resetUrl });
+  }
+
+  async resetPassword(token: string, newPassword: string): Promise<void> {
+    return this.usersService.resetPassword(token, newPassword);
   }
 
   private sanitizeUser(user: any) {

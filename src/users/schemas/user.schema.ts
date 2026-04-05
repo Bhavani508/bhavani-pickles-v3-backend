@@ -61,6 +61,12 @@ export class User {
 
   @Prop({ type: [{ type: Types.ObjectId, ref: 'Product' }], default: [] })
   wishlist!: Types.ObjectId[];
+
+  @Prop({ select: false })
+  resetPasswordToken?: string;
+
+  @Prop({ select: false })
+  resetPasswordExpires?: Date;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

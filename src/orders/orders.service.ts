@@ -21,6 +21,7 @@ import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { VerifyPaymentDto } from './dto/verify-payment.dto';
 import { CancelOrderDto } from './dto/cancel-order.dto';
+import { EmailService } from '../email/email.service';
 
 @Injectable()
 export class OrdersService {
@@ -34,6 +35,7 @@ export class OrdersService {
     @InjectModel(Product.name) private productModel: Model<ProductDocument>,
     @InjectModel(User.name) private userModel: Model<UserDocument>,
     private configService: ConfigService,
+    private emailService: EmailService,
   ) {
     this.razorpay = new Razorpay({
       key_id: this.configService.get<string>('RAZORPAY_KEY_ID')!,
@@ -56,16 +58,21 @@ export class OrdersService {
     const email = dto.customerEmail.toLowerCase().trim();
     let user = await this.userModel.findOne({ email });
     if (!user) {
-      const tempPassword = await bcrypt.hash(
-        crypto.randomBytes(20).toString('hex'),
-        12,
-      );
+      const plainPassword = crypto.randomBytes(10).toString('hex');
+      const hashedPassword = await bcrypt.hash(plainPassword, 12);
       user = await new this.userModel({
         name: dto.customerName.trim(),
         email,
         phone: dto.customerPhone,
-        password: tempPassword,
+        password: hashedPassword,
       }).save();
+
+      this.emailService.sendWelcome({
+        name: user.name,
+        email: user.email,
+        password: plainPassword,
+        isAutoCreated: true,
+      });
     }
     return user;
   }
@@ -133,6 +140,16 @@ export class OrdersService {
       await this.deductStock(orderItems);
       if (userId) await this.clearServerCart(uid);
 
+      this.emailService.sendOrderConfirmation({
+        customerName: user.name,
+        customerEmail: user.email,
+        orderId: (order._id as Types.ObjectId).toString(),
+        items: orderItems,
+        totalAmount,
+        shippingAddress: dto.shippingAddress,
+        paymentType: 'COD',
+      });
+
       return { orderId: order._id, paymentType: 'COD' };
     }
 
@@ -190,6 +207,24 @@ export class OrdersService {
 
     await this.deductStock(order.items as any[]);
     await this.clearServerCart(order.user as Types.ObjectId);
+
+    const user = await this.userModel.findById(order.user);
+    if (user) {
+      this.emailService.sendOrderConfirmation({
+        customerName: user.name,
+        customerEmail: user.email,
+        orderId: orderId,
+        items: (order.items as any[]).map((i) => ({
+          name: i.name,
+          weight: i.weight,
+          quantity: i.quantity,
+          price: i.price,
+        })),
+        totalAmount: order.totalAmount,
+        shippingAddress: order.shippingAddress,
+        paymentType: 'online',
+      });
+    }
 
     return order.populate('items.product');
   }
@@ -264,6 +299,24 @@ export class OrdersService {
     order.cancelledBy = role === 'admin' ? 'admin' : 'user';
     await order.save();
 
+    const user = await this.userModel.findById(order.user);
+    if (user) {
+      this.emailService.sendOrderCancelled({
+        customerName: user.name,
+        customerEmail: user.email,
+        orderId: orderId,
+        items: (order.items as any[]).map((i) => ({
+          name: i.name,
+          weight: i.weight,
+          quantity: i.quantity,
+          price: i.price,
+        })),
+        totalAmount: order.totalAmount,
+        reason: dto.reason,
+        cancelledBy: order.cancelledBy!,
+      });
+    }
+
     return order.populate('items.product');
   }
 
@@ -329,6 +382,17 @@ export class OrdersService {
       { new: true },
     );
     if (!order) throw new NotFoundException('Order not found');
+
+    const user = await this.userModel.findById(order.user);
+    if (user) {
+      this.emailService.sendOrderStatusUpdate({
+        customerName: user.name,
+        customerEmail: user.email,
+        orderId: id,
+        status: dto.status,
+      });
+    }
+
     return order;
   }
 }

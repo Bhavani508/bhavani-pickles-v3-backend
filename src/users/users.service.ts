@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -6,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import * as bcrypt from 'bcryptjs';
+import * as crypto from 'crypto';
 import { Model, Types } from 'mongoose';
 import { AddressDto } from './dto/address.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
@@ -112,6 +114,37 @@ export class UsersService {
 
   async remove(id: string): Promise<void> {
     await this.userModel.findByIdAndUpdate(id, { isActive: false });
+  }
+
+  async createPasswordResetToken(email: string): Promise<{ token: string; name: string } | null> {
+    const user = await this.userModel.findOne({ email: email.toLowerCase() });
+    if (!user || !user.isActive) return null; // silently return null to prevent email enumeration
+
+    const token = crypto.randomBytes(32).toString('hex');
+    const expires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+    await this.userModel.findByIdAndUpdate(user._id, {
+      resetPasswordToken: token,
+      resetPasswordExpires: expires,
+    });
+
+    return { token, name: user.name };
+  }
+
+  async resetPassword(token: string, newPassword: string): Promise<void> {
+    const user = await this.userModel
+      .findOne({
+        resetPasswordToken: token,
+        resetPasswordExpires: { $gt: new Date() },
+      })
+      .select('+resetPasswordToken +resetPasswordExpires');
+
+    if (!user) throw new BadRequestException('Reset link is invalid or has expired');
+
+    user.password = await bcrypt.hash(newPassword, 12);
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpires = undefined;
+    await user.save();
   }
 
   async getWishlist(userId: string) {
