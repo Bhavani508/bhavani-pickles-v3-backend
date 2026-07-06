@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { OrdersService } from './orders.service';
+import { InvoiceService } from './invoice.service';
 import { OrdersController } from './orders.controller';
 import { Order, OrderSchema } from './schemas/order.schema';
 import { Cart, CartSchema } from '../cart/schemas/cart.schema';
@@ -23,6 +24,6 @@ import { EmailModule } from '../email/email.module';
     ]),
   ],
   controllers: [OrdersController],
-  providers: [OrdersService],
+  providers: [OrdersService, InvoiceService],
 })
 export class OrdersModule {}

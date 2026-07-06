@@ -5,10 +5,13 @@ import {
   Patch,
   Param,
   Body,
+  Res,
   UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { OrdersService } from './orders.service';
+import { InvoiceService } from './invoice.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { VerifyPaymentDto } from './dto/verify-payment.dto';
@@ -24,7 +27,10 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 @ApiBearerAuth()
 @Controller('orders')
 export class OrdersController {
-  constructor(private readonly ordersService: OrdersService) {}
+  constructor(
+    private readonly ordersService: OrdersService,
+    private readonly invoiceService: InvoiceService,
+  ) {}
 
   // Works for both guests and logged-in users
   @Post('initiate')
@@ -53,6 +59,30 @@ export class OrdersController {
   @Roles(Role.ADMIN)
   findAll() {
     return this.ordersService.findAll();
+  }
+
+  @Get(':id/invoice')
+  @UseGuards(JwtAuthGuard)
+  async downloadInvoice(
+    @Param('id') id: string,
+    @Res() res: Response,
+  ) {
+    const order = await this.ordersService.findOne(id);
+    const user = order.user as any;
+    const shortId = id.slice(-8).toUpperCase();
+
+    const doc = this.invoiceService.generateInvoice(
+      order,
+      user?.name ?? 'Customer',
+      user?.email ?? '',
+    );
+
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename=invoice-${shortId}.pdf`,
+    });
+
+    doc.pipe(res);
   }
 
   @Get(':id')
