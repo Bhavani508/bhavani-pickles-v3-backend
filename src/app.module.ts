@@ -4,6 +4,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { LoggerModule } from 'nestjs-pino';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
+import * as Joi from 'joi';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { ProductsModule } from './products/products.module';
@@ -17,6 +18,17 @@ import { UploadModule } from './upload/upload.module';
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
+      validationSchema: Joi.object({
+        NODE_ENV: Joi.string().valid('development', 'production', 'staging').default('development'),
+        PORT: Joi.number().default(3000),
+        MONGODB_URI: Joi.string().required(),
+        JWT_SECRET: Joi.string().required(),
+        JWT_REFRESH_SECRET: Joi.string().required(),
+        RAZORPAY_KEY_ID: Joi.string().required(),
+        RAZORPAY_KEY_SECRET: Joi.string().required(),
+        FRONTEND_URL: Joi.string().default('http://localhost:4200'),
+      }),
+      validationOptions: { allowUnknown: true, abortEarly: false },
     }),
     LoggerModule.forRootAsync({
       imports: [ConfigModule],

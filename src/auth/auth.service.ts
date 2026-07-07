@@ -57,21 +57,17 @@ export class AuthService {
     return { accessToken, refreshToken };
   }
 
-  async refreshToken(refreshToken: string) {
+  async refreshToken(oldRefreshToken: string) {
     try {
-      const payload = await this.jwtService.verifyAsync(refreshToken, {
+      const payload = await this.jwtService.verifyAsync(oldRefreshToken, {
         secret: this.configService.get('JWT_REFRESH_SECRET'),
       });
       const user = await this.usersService.findById(payload.sub);
       if (!user || !user.isActive) throw new UnauthorizedException();
-      const accessToken = await this.jwtService.signAsync(
-        { sub: user.id, email: user.email, role: user.role },
-        {
-          secret: this.configService.get('JWT_SECRET'),
-          expiresIn: this.configService.get('JWT_EXPIRES_IN', '15m'),
-        },
-      );
-      return { accessToken };
+
+      // Rotate: issue both new access and refresh tokens
+      const tokens = await this.generateTokens(user.id, user.email, user.role);
+      return tokens;
     } catch {
       throw new UnauthorizedException('Invalid refresh token');
     }
