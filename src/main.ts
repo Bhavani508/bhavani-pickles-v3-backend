@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { Logger } from 'nestjs-pino';
+import helmet from 'helmet';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
@@ -21,6 +22,9 @@ async function bootstrap() {
       transform: true,
     }),
   );
+
+  // Security headers
+  app.use(helmet());
 
   // CORS
   app.enableCors({

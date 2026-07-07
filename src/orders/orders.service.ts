@@ -395,13 +395,29 @@ export class OrdersService {
     }
   }
 
-  findAll() {
-    return this.orderModel
-      .find()
-      .populate('user', 'name email')
-      .populate('items.product')
-      .sort({ createdAt: -1 })
-      .exec();
+  async findAll(query?: {
+    status?: string;
+    page?: number;
+    limit?: number;
+  }) {
+    const { status, page = 1, limit = 20 } = query ?? {};
+    const filter: any = {};
+    if (status) filter.status = status;
+
+    const skip = (page - 1) * limit;
+    const [items, total] = await Promise.all([
+      this.orderModel
+        .find(filter)
+        .populate('user', 'name email')
+        .populate('items.product')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .exec(),
+      this.orderModel.countDocuments(filter),
+    ]);
+
+    return { items, total, page, limit, pages: Math.ceil(total / limit) };
   }
 
   findByUser(userId: string) {

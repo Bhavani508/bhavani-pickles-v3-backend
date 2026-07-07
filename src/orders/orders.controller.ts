@@ -5,6 +5,7 @@ import {
   Patch,
   Param,
   Body,
+  Query,
   Res,
   UseGuards,
 } from '@nestjs/common';
@@ -57,8 +58,12 @@ export class OrdersController {
   @Get()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
-  findAll() {
-    return this.ordersService.findAll();
+  findAll(
+    @Query('status') status?: string,
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+  ) {
+    return this.ordersService.findAll({ status, page, limit });
   }
 
   @Get(':id/invoice')

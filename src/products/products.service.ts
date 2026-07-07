@@ -15,6 +15,7 @@ export interface ProductQuery {
   search?: string;
   minPrice?: number;
   maxPrice?: number;
+  sort?: string; // 'price_asc' | 'price_desc' | 'name_asc' | 'name_desc' | 'newest'
   page?: number;
   limit?: number;
 }
@@ -61,6 +62,7 @@ export class ProductsService {
       search,
       minPrice,
       maxPrice,
+      sort,
       page = 1,
       limit = 12,
     } = query;
@@ -89,18 +91,37 @@ export class ProductsService {
       filter._id = { $in: matchingProductIds };
     }
 
+    // Sort options
+    const sortMap: Record<string, Record<string, 1 | -1>> = {
+      name_asc: { name: 1 },
+      name_desc: { name: -1 },
+      newest: { createdAt: -1 },
+    };
+    const sortOrder: any = sort ? (sortMap[sort] ?? { createdAt: -1 }) : { createdAt: -1 };
+
     const skip = (page - 1) * limit;
+    let query_ = this.productModel
+      .find(filter)
+      .populate('category')
+      .populate('variants')
+      .sort(sortOrder)
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
     const [items, total] = await Promise.all([
-      this.productModel
-        .find(filter)
-        .populate('category')
-        .populate('variants')
-        .skip(skip)
-        .limit(limit)
-        .lean()
-        .exec(),
+      query_.exec(),
       this.productModel.countDocuments(filter),
     ]);
+
+    // Post-query sort for price (needs variant data)
+    if (sort === 'price_asc' || sort === 'price_desc') {
+      items.sort((a: any, b: any) => {
+        const priceA = a.variants?.[0]?.price ?? 0;
+        const priceB = b.variants?.[0]?.price ?? 0;
+        return sort === 'price_asc' ? priceA - priceB : priceB - priceA;
+      });
+    }
 
     return { items, total, page, limit, pages: Math.ceil(total / limit) };
   }
