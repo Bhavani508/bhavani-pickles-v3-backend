@@ -55,6 +55,13 @@ export class OrdersController {
     return this.ordersService.findByUser(userId);
   }
 
+  @Get('dashboard-stats')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  getDashboardStats() {
+    return this.ordersService.getDashboardStats();
+  }
+
   @Get()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)

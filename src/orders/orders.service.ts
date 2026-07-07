@@ -458,4 +458,59 @@ export class OrdersService {
 
     return order;
   }
+
+  async getDashboardStats() {
+    const now = new Date();
+    const sevenDaysAgo = new Date(now);
+    sevenDaysAgo.setDate(now.getDate() - 6);
+    sevenDaysAgo.setHours(0, 0, 0, 0);
+
+    const [totals, daily, statusBreakdown] = await Promise.all([
+      // Total revenue and count
+      this.orderModel.aggregate([
+        { $group: { _id: null, totalRevenue: { $sum: '$totalAmount' }, totalOrders: { $sum: 1 } } },
+      ]),
+      // Daily orders and revenue for last 7 days
+      this.orderModel.aggregate([
+        { $match: { createdAt: { $gte: sevenDaysAgo } } },
+        {
+          $group: {
+            _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+            orders: { $sum: 1 },
+            revenue: { $sum: '$totalAmount' },
+          },
+        },
+        { $sort: { _id: 1 } },
+      ]),
+      // Orders by status
+      this.orderModel.aggregate([
+        { $group: { _id: '$status', count: { $sum: 1 } } },
+      ]),
+    ]);
+
+    // Fill in missing days
+    const dailyMap = new Map(daily.map((d: any) => [d._id, d]));
+    const dailyData: { date: string; orders: number; revenue: number }[] = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(sevenDaysAgo);
+      d.setDate(sevenDaysAgo.getDate() + i);
+      const key = d.toISOString().slice(0, 10);
+      const entry = dailyMap.get(key);
+      dailyData.push({
+        date: key,
+        orders: entry?.orders ?? 0,
+        revenue: entry?.revenue ?? 0,
+      });
+    }
+
+    return {
+      totalOrders: totals[0]?.totalOrders ?? 0,
+      totalRevenue: totals[0]?.totalRevenue ?? 0,
+      daily: dailyData,
+      statusBreakdown: statusBreakdown.map((s: any) => ({
+        status: s._id,
+        count: s.count,
+      })),
+    };
+  }
 }
