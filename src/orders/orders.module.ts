@@ -4,6 +4,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { OrdersService } from './orders.service';
 import { InvoiceService } from './invoice.service';
 import { OrdersController } from './orders.controller';
+import { OrdersWebhookController } from './orders-webhook.controller';
 import { Order, OrderSchema } from './schemas/order.schema';
 import { Cart, CartSchema } from '../cart/schemas/cart.schema';
 import { ProductVariant, ProductVariantSchema } from '../products/schemas/product-variant.schema';
@@ -23,7 +24,7 @@ import { EmailModule } from '../email/email.module';
       { name: User.name, schema: UserSchema },
     ]),
   ],
-  controllers: [OrdersController],
+  controllers: [OrdersController, OrdersWebhookController],
   providers: [OrdersService, InvoiceService],
 })
 export class OrdersModule {}

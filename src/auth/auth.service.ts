@@ -81,7 +81,7 @@ export class AuthService {
     const result = await this.usersService.createPasswordResetToken(email);
     if (!result) return; // don't reveal whether email exists
 
-    const clientUrl = this.configService.get('CLIENT_URL', 'https://www.bhavanipickles.com');
+    const clientUrl = this.configService.get('FRONTEND_URL', 'https://www.bhavanipickles.com');
     const resetUrl = `${clientUrl}/auth/reset-password?token=${result.token}`;
 
     this.emailService.sendPasswordReset({ name: result.name, email, resetUrl });

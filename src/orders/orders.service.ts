@@ -199,6 +199,11 @@ export class OrdersService {
       throw new BadRequestException('Invalid payment signature');
     }
 
+    // Already confirmed by webhook — just return the order
+    if (order.isPaid) {
+      return order.populate('items.product');
+    }
+
     order.isPaid = true;
     order.paidAt = new Date();
     order.status = OrderStatus.CONFIRMED;
@@ -345,6 +350,48 @@ export class OrdersService {
           isOutOfStock: false,
         });
       }
+    }
+  }
+
+  // ── Webhook: handle Razorpay payment.captured event ──────────────────────
+  async handlePaymentCaptured(
+    razorpayOrderId: string,
+    razorpayPaymentId: string,
+  ) {
+    const order = await this.orderModel.findOne({ razorpayOrderId });
+    if (!order) {
+      // Order not found for this Razorpay order — ignore (could be a different system)
+      return;
+    }
+
+    // Already processed (e.g. frontend verify-payment was faster)
+    if (order.isPaid) return;
+
+    order.isPaid = true;
+    order.paidAt = new Date();
+    order.status = OrderStatus.CONFIRMED;
+    order.razorpayPaymentId = razorpayPaymentId;
+    await order.save();
+
+    await this.deductStock(order.items as any[]);
+    await this.clearServerCart(order.user as Types.ObjectId);
+
+    const user = await this.userModel.findById(order.user);
+    if (user) {
+      this.emailService.sendOrderConfirmation({
+        customerName: user.name,
+        customerEmail: user.email,
+        orderId: (order._id as Types.ObjectId).toString(),
+        items: (order.items as any[]).map((i) => ({
+          name: i.name,
+          weight: i.weight,
+          quantity: i.quantity,
+          price: i.price,
+        })),
+        totalAmount: order.totalAmount,
+        shippingAddress: order.shippingAddress,
+        paymentType: 'online',
+      });
     }
   }
 
