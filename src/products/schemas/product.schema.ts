@@ -35,6 +35,9 @@ export class Product {
   @Prop({ default: false })
   isOutOfStock!: boolean;
 
+  @Prop({ default: false })
+  isBestSeller!: boolean;
+
   @Prop({ type: [String], default: [] })
   tags!: string[];
 

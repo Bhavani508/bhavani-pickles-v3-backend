@@ -7,6 +7,7 @@ import {
   ProductVariantDocument,
 } from './schemas/product-variant.schema';
 import { Category, CategoryDocument } from '../categories/schemas/category.schema';
+import { Order, OrderDocument } from '../orders/schemas/order.schema';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 
@@ -27,6 +28,7 @@ export class ProductsService {
     @InjectModel(ProductVariant.name)
     private variantModel: Model<ProductVariantDocument>,
     @InjectModel(Category.name) private categoryModel: Model<CategoryDocument>,
+    @InjectModel(Order.name) private orderModel: Model<OrderDocument>,
   ) {}
 
   async create(dto: CreateProductDto) {
@@ -179,5 +181,81 @@ export class ProductsService {
         { stock: 0 },
       ),
     ]);
+  }
+
+  async toggleBestSeller(id: string) {
+    const product = await this.productModel.findById(id);
+    if (!product) throw new NotFoundException('Product not found');
+    product.isBestSeller = !product.isBestSeller;
+    await product.save();
+    return product.populate(['category', 'variants']);
+  }
+
+  async getBestSellers() {
+    // Check for admin-marked best sellers
+    const marked = await this.productModel
+      .find({ isBestSeller: true, isActive: true })
+      .populate('category')
+      .populate('variants')
+      .lean()
+      .exec();
+
+    if (marked.length > 0) return marked;
+
+    // Fallback: top 2 most ordered products per category (from non-cancelled orders)
+    const topProducts = await this.orderModel.aggregate([
+      { $match: { status: { $ne: 'cancelled' } } },
+      { $unwind: '$items' },
+      {
+        $group: {
+          _id: '$items.product',
+          totalOrdered: { $sum: '$items.quantity' },
+        },
+      },
+      { $sort: { totalOrdered: -1 } },
+    ]);
+
+    if (topProducts.length === 0) {
+      // No orders at all — return newest 8 products
+      return this.productModel
+        .find({ isActive: true })
+        .populate('category')
+        .populate('variants')
+        .sort({ createdAt: -1 })
+        .limit(8)
+        .lean()
+        .exec();
+    }
+
+    // Load the products and group by category, pick top 2 per category
+    const productIds = topProducts.map((p) => p._id);
+    const products = await this.productModel
+      .find({ _id: { $in: productIds }, isActive: true })
+      .populate('category')
+      .populate('variants')
+      .lean()
+      .exec();
+
+    // Preserve order ranking from aggregation
+    const rankMap = new Map(productIds.map((id, i) => [id.toString(), i]));
+    products.sort(
+      (a: any, b: any) =>
+        (rankMap.get(a._id.toString()) ?? 999) -
+        (rankMap.get(b._id.toString()) ?? 999),
+    );
+
+    // Pick top 2 per category
+    const perCategory = new Map<string, number>();
+    const result: any[] = [];
+    for (const product of products) {
+      const catId = (product.category as any)?._id?.toString() ?? 'unknown';
+      const count = perCategory.get(catId) ?? 0;
+      if (count < 2) {
+        result.push(product);
+        perCategory.set(catId, count + 1);
+      }
+    }
+
+    return result;
   }
 }

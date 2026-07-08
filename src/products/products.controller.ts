@@ -33,6 +33,11 @@ export class ProductsController {
     return this.productsService.findAll({ category, search, minPrice, maxPrice, sort, page, limit });
   }
 
+  @Get('best-sellers')
+  getBestSellers() {
+    return this.productsService.getBestSellers();
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.productsService.findOne(id);
@@ -52,6 +57,14 @@ export class ProductsController {
   @Roles(Role.ADMIN)
   update(@Param('id') id: string, @Body() dto: UpdateProductDto) {
     return this.productsService.update(id, dto);
+  }
+
+  @Patch(':id/best-seller')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  toggleBestSeller(@Param('id') id: string) {
+    return this.productsService.toggleBestSeller(id);
   }
 
   @Delete(':id')
