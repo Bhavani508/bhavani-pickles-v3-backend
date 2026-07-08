@@ -14,6 +14,7 @@ import { UpdateProductDto } from './dto/update-product.dto';
 export interface ProductQuery {
   category?: string;
   search?: string;
+  tag?: string;
   minPrice?: number;
   maxPrice?: number;
   sort?: string; // 'price_asc' | 'price_desc' | 'name_asc' | 'name_desc' | 'newest'
@@ -62,6 +63,7 @@ export class ProductsService {
     const {
       category,
       search,
+      tag,
       minPrice,
       maxPrice,
       sort,
@@ -72,6 +74,7 @@ export class ProductsService {
     const filter: any = { isActive: true };
 
     if (category) filter.category = category;
+    if (tag) filter.tags = tag;
     if (search) {
       const regex = new RegExp(search, 'i');
       const matchingCategories = await this.categoryModel
@@ -181,6 +184,10 @@ export class ProductsService {
         { stock: 0 },
       ),
     ]);
+  }
+
+  async getDistinctTags(): Promise<string[]> {
+    return this.productModel.distinct('tags', { isActive: true }).exec();
   }
 
   async toggleBestSeller(id: string) {

@@ -16,6 +16,7 @@ export class ProductsController {
   @Get()
   @ApiQuery({ name: 'category', required: false })
   @ApiQuery({ name: 'search', required: false })
+  @ApiQuery({ name: 'tag', required: false })
   @ApiQuery({ name: 'minPrice', required: false, type: Number })
   @ApiQuery({ name: 'maxPrice', required: false, type: Number })
   @ApiQuery({ name: 'sort', required: false })
@@ -24,13 +25,19 @@ export class ProductsController {
   findAll(
     @Query('category') category?: string,
     @Query('search') search?: string,
+    @Query('tag') tag?: string,
     @Query('minPrice') minPrice?: number,
     @Query('maxPrice') maxPrice?: number,
     @Query('sort') sort?: string,
     @Query('page') page?: number,
     @Query('limit') limit?: number,
   ) {
-    return this.productsService.findAll({ category, search, minPrice, maxPrice, sort, page, limit });
+    return this.productsService.findAll({ category, search, tag, minPrice, maxPrice, sort, page, limit });
+  }
+
+  @Get('tags')
+  getTags() {
+    return this.productsService.getDistinctTags();
   }
 
   @Get('best-sellers')
