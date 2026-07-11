@@ -121,4 +121,24 @@ export class OrdersController {
   updateStatus(@Param('id') id: string, @Body() dto: UpdateOrderStatusDto) {
     return this.ordersService.updateStatus(id, dto);
   }
+
+  @Post(':id/ship')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  shipOrder(@Param('id') id: string) {
+    return this.ordersService.shipOrder(id);
+  }
+
+  @Get(':id/tracking')
+  @UseGuards(JwtAuthGuard)
+  getTracking(@Param('id') id: string) {
+    return this.ordersService.getShipmentTracking(id);
+  }
+
+  @Get(':id/label')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  getLabel(@Param('id') id: string) {
+    return this.ordersService.getShippingLabel(id);
+  }
 }
