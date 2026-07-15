@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
@@ -22,9 +23,11 @@ import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { VerifyPaymentDto } from './dto/verify-payment.dto';
 import { CancelOrderDto } from './dto/cancel-order.dto';
 import { EmailService } from '../email/email.service';
+import { ShiprocketService } from '../shipping/shiprocket.service';
 
 @Injectable()
 export class OrdersService {
+  private readonly logger = new Logger(OrdersService.name);
   private razorpay: Razorpay;
 
   constructor(
@@ -36,6 +39,7 @@ export class OrdersService {
     @InjectModel(User.name) private userModel: Model<UserDocument>,
     private configService: ConfigService,
     private emailService: EmailService,
+    private shiprocketService: ShiprocketService,
   ) {
     this.razorpay = new Razorpay({
       key_id: this.configService.get<string>('RAZORPAY_KEY_ID')!,
@@ -512,5 +516,193 @@ export class OrdersService {
         count: s.count,
       })),
     };
+  }
+
+  // ── Shiprocket: Ship an order ─────────────────────────────────────────────
+
+  async shipOrder(orderId: string) {
+    const order = await this.orderModel
+      .findById(orderId)
+      .populate('user', 'name email phone')
+      .exec();
+    if (!order) throw new NotFoundException('Order not found');
+
+    if (order.status === 'cancelled')
+      throw new BadRequestException('Cannot ship a cancelled order');
+    if (order.shiprocketOrderId)
+      throw new BadRequestException('Order already submitted to Shiprocket');
+
+    const user = order.user as any;
+    const addr = order.shippingAddress;
+    const createdAt = (order as any).createdAt as Date;
+
+    // Create order on Shiprocket
+    const srOrder = await this.shiprocketService.createOrder({
+      orderId: orderId,
+      orderDate: this.formatDate(createdAt),
+      customerName: user?.name ?? 'Customer',
+      customerEmail: user?.email ?? '',
+      customerPhone: addr.phone ?? user?.phone ?? '',
+      shippingAddress: addr.street,
+      shippingCity: addr.city,
+      shippingState: addr.state,
+      shippingPincode: addr.pincode,
+      shippingCountry: addr.country || 'India',
+      items: (order.items as any[]).map((item) => ({
+        name: item.name,
+        sku: `${item.product?.toString()?.slice(-8) ?? 'PROD'}-${item.weight}`,
+        units: item.quantity,
+        sellingPrice: item.price,
+      })),
+      paymentMethod: order.paymentType === 'COD' ? 'COD' : 'Prepaid',
+      subTotal: order.totalAmount,
+      weight: 0.5, // default weight in kg
+      length: 20,
+      breadth: 15,
+      height: 10,
+    });
+
+    this.logger.log(`Shiprocket createOrder response: ${JSON.stringify(srOrder)}`);
+
+    order.shiprocketOrderId = srOrder.order_id;
+    order.shiprocketShipmentId = srOrder.shipment_id;
+
+    // Auto-assign courier
+    try {
+      const courierRes = await this.shiprocketService.assignCourier(srOrder.shipment_id);
+      const courierData = courierRes.response?.data;
+      if (courierData) {
+        order.awbCode = courierData.awb_code;
+        order.courierName = courierData.courier_name;
+      }
+    } catch (e) {
+      // Courier assignment can fail if no courier is serviceable — save what we have
+    }
+
+    // Schedule pickup
+    try {
+      await this.shiprocketService.generatePickup(srOrder.shipment_id);
+    } catch {
+      // Non-fatal
+    }
+
+    const isProduction = this.configService.get<string>('NODE_ENV') === 'production';
+
+    // In non-production environments, cancel the Shiprocket order immediately
+    if (!isProduction) {
+      try {
+        await this.shiprocketService.cancelOrder(srOrder.order_id);
+      } catch {
+        // Non-fatal — order may not be cancellable yet
+      }
+
+      order.status = OrderStatus.SHIPPED;
+      await order.save();
+      return {
+        ...(await order.populate('items.product')).toObject(),
+        _testMode: true,
+        _message: 'Shiprocket order created and cancelled immediately (test mode)',
+      };
+    }
+
+    // Update status to shipped if courier was assigned
+    if (order.awbCode) {
+      order.status = OrderStatus.SHIPPED;
+
+      // Send email notification
+      if (user?.email) {
+        this.emailService.sendOrderStatusUpdate({
+          customerName: user.name,
+          customerEmail: user.email,
+          orderId,
+          status: 'shipped',
+        });
+      }
+    }
+
+    await order.save();
+    return order.populate('items.product');
+  }
+
+  // ── Get live tracking from Shiprocket ─────────────────────────────────────
+
+  async getShipmentTracking(orderId: string) {
+    const order = await this.orderModel.findById(orderId).lean().exec();
+    if (!order) throw new NotFoundException('Order not found');
+
+    if (order.awbCode) {
+      return this.shiprocketService.getTracking(order.awbCode);
+    }
+    if (order.shiprocketShipmentId) {
+      return this.shiprocketService.getTrackingByShipment(order.shiprocketShipmentId);
+    }
+
+    throw new BadRequestException('No shipping info available for this order');
+  }
+
+  // ── Get shipping label ────────────────────────────────────────────────────
+
+  async getShippingLabel(orderId: string) {
+    const order = await this.orderModel.findById(orderId).lean().exec();
+    if (!order) throw new NotFoundException('Order not found');
+    if (!order.shiprocketShipmentId)
+      throw new BadRequestException('Order not shipped via Shiprocket');
+
+    const result = await this.shiprocketService.generateLabel(order.shiprocketShipmentId);
+    return { labelUrl: result.label_url };
+  }
+
+  // ── Handle Shiprocket webhook status update ───────────────────────────────
+
+  async handleShiprocketWebhook(payload: any) {
+    const awb = payload.awb;
+    const status = payload.current_status?.toLowerCase();
+    if (!awb || !status) return;
+
+    const order = await this.orderModel.findOne({ awbCode: awb });
+    if (!order) return;
+
+    // Map Shiprocket status to our status
+    const statusMap: Record<string, OrderStatus> = {
+      'picked up': OrderStatus.SHIPPED,
+      'in transit': OrderStatus.SHIPPED,
+      'out for delivery': OrderStatus.SHIPPED,
+      delivered: OrderStatus.DELIVERED,
+      rto: OrderStatus.CANCELLED,
+    };
+
+    const mapped = statusMap[status];
+    if (!mapped || order.status === mapped) return;
+
+    // Only allow forward progression (don't go backwards)
+    const progression = [
+      OrderStatus.PENDING, OrderStatus.CONFIRMED, OrderStatus.PROCESSING,
+      OrderStatus.SHIPPED, OrderStatus.DELIVERED,
+    ];
+    const currentIdx = progression.indexOf(order.status);
+    const newIdx = progression.indexOf(mapped);
+    if (newIdx <= currentIdx && mapped !== OrderStatus.CANCELLED) return;
+
+    order.status = mapped;
+    await order.save();
+
+    const user = await this.userModel.findById(order.user);
+    if (user) {
+      this.emailService.sendOrderStatusUpdate({
+        customerName: user.name,
+        customerEmail: user.email,
+        orderId: (order._id as Types.ObjectId).toString(),
+        status: mapped,
+      });
+    }
+  }
+
+  private formatDate(date: Date): string {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    const h = String(date.getHours()).padStart(2, '0');
+    const min = String(date.getMinutes()).padStart(2, '0');
+    return `${y}-${m}-${d} ${h}:${min}`;
   }
 }
