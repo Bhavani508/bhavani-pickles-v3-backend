@@ -3,7 +3,6 @@ require('dotenv').config();
 const config = {
   mongodb: {
     url:
-      process.env.MONGODB_URI ||
       process.env.MONGO_URL ||
       process.env.DATABASE_URL ||
       'mongodb://localhost:27017/bhavani_pickles',
