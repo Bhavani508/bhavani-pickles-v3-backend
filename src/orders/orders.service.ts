@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
@@ -26,6 +27,7 @@ import { ShiprocketService } from '../shipping/shiprocket.service';
 
 @Injectable()
 export class OrdersService {
+  private readonly logger = new Logger(OrdersService.name);
   private razorpay: Razorpay;
 
   constructor(
@@ -560,6 +562,8 @@ export class OrdersService {
       height: 10,
     });
 
+    this.logger.log(`Shiprocket createOrder response: ${JSON.stringify(srOrder)}`);
+
     order.shiprocketOrderId = srOrder.order_id;
     order.shiprocketShipmentId = srOrder.shipment_id;
 
@@ -580,6 +584,25 @@ export class OrdersService {
       await this.shiprocketService.generatePickup(srOrder.shipment_id);
     } catch {
       // Non-fatal
+    }
+
+    const isProduction = this.configService.get<string>('NODE_ENV') === 'production';
+
+    // In non-production environments, cancel the Shiprocket order immediately
+    if (!isProduction) {
+      try {
+        await this.shiprocketService.cancelOrder(srOrder.order_id);
+      } catch {
+        // Non-fatal — order may not be cancellable yet
+      }
+
+      order.status = OrderStatus.SHIPPED;
+      await order.save();
+      return {
+        ...(await order.populate('items.product')).toObject(),
+        _testMode: true,
+        _message: 'Shiprocket order created and cancelled immediately (test mode)',
+      };
     }
 
     // Update status to shipped if courier was assigned

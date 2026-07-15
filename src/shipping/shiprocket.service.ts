@@ -204,4 +204,10 @@ export class ShiprocketService {
   async getTrackingByShipment(shipmentId: number): Promise<TrackingResponse> {
     return this.request<TrackingResponse>('GET', `/courier/track/shipment/${shipmentId}`);
   }
+
+  async cancelOrder(shiprocketOrderId: number): Promise<any> {
+    return this.request('POST', '/orders/cancel', {
+      ids: [shiprocketOrderId],
+    });
+  }
 }
