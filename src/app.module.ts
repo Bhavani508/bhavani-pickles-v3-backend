@@ -21,8 +21,7 @@ import { UploadModule } from './upload/upload.module';
       validationSchema: Joi.object({
         NODE_ENV: Joi.string().valid('development', 'production', 'staging').default('development'),
         PORT: Joi.number().default(3000),
-        MONGODB_URI: Joi.string().when('MONGO_URL', { is: Joi.exist(), then: Joi.optional(), otherwise: Joi.required() }),
-        MONGO_URL: Joi.string().optional(),
+        MONGO_URL: Joi.string().required(),
         JWT_SECRET: Joi.string().required(),
         JWT_REFRESH_SECRET: Joi.string().required(),
         RAZORPAY_KEY_ID: Joi.string().required(),
@@ -62,7 +61,6 @@ import { UploadModule } from './upload/upload.module';
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => ({
         uri:
-          configService.get<string>('MONGODB_URI') ||
           configService.get<string>('MONGO_URL') ||
           configService.get<string>('DATABASE_URL') ||
           'mongodb://localhost:27017/bhavani_pickles',
