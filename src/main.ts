@@ -31,8 +31,11 @@ async function bootstrap() {
   app.use(helmet());
 
   // CORS
+  const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:4200')
+    .split(',')
+    .map(u => u.trim());
   app.enableCors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:4200',
+    origin: allowedOrigins,
     credentials: true,
   });
 
