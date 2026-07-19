@@ -53,6 +53,15 @@ export class User {
   @Prop({ default: true })
   isActive!: boolean;
 
+  @Prop({ default: false })
+  isEmailVerified!: boolean;
+
+  @Prop({ select: false })
+  emailVerificationToken?: string;
+
+  @Prop({ select: false })
+  emailVerificationExpires?: Date;
+
   @Prop()
   phone?: string;
 

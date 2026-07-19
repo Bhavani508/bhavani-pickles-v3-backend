@@ -32,7 +32,7 @@ export class CartService {
       weight: dto.weight,
     });
     if (!variant) throw new NotFoundException('Variant not found');
-    if (variant.stock < dto.quantity) throw new BadRequestException('Insufficient stock');
+    if (variant.leftoverStock < dto.quantity) throw new BadRequestException('Insufficient stock');
 
     const uid = new Types.ObjectId(userId);
     let cart = await this.cartModel.findOne({ user: uid });
@@ -45,9 +45,9 @@ export class CartService {
 
     if (existingItem) {
       const newTotal = existingItem.quantity + dto.quantity;
-      if (newTotal > variant.stock) {
+      if (newTotal > variant.leftoverStock) {
         throw new BadRequestException(
-          `Only ${variant.stock} units available. You already have ${existingItem.quantity} in your cart.`,
+          `Only ${variant.leftoverStock} units available. You already have ${existingItem.quantity} in your cart.`,
         );
       }
       existingItem.quantity = newTotal;

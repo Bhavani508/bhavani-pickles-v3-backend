@@ -8,6 +8,7 @@ import {
   Query,
   Res,
   UseGuards,
+  ForbiddenException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import type { Response } from 'express';
@@ -73,13 +74,37 @@ export class OrdersController {
     return this.ordersService.findAll({ status, page, limit });
   }
 
+  @Get('shipping-rates')
+  async getShippingRates(
+    @Query('pincode') pincode: string,
+    @Query('weight') weight?: string,
+    @Query('cod') cod?: string,
+  ) {
+    return this.ordersService.getShippingRates(pincode, Number(weight) || 0.5, cod === 'true');
+  }
+
+  @Get('track')
+  async trackGuestOrder(
+    @Query('orderId') orderId: string,
+    @Query('email') email: string,
+  ) {
+    return this.ordersService.trackGuestOrder(orderId, email);
+  }
+
   @Get(':id/invoice')
   @UseGuards(JwtAuthGuard)
   async downloadInvoice(
     @Param('id') id: string,
+    @CurrentUser('sub') userId: string,
+    @CurrentUser('role') role: string,
     @Res() res: Response,
   ) {
     const order = await this.ordersService.findOne(id);
+    const orderUserId = (order.user as any)?._id?.toString() ?? order.user?.toString();
+    if (role !== 'admin' && orderUserId !== userId) {
+      res.status(403).json({ message: 'You can only download your own invoices' });
+      return;
+    }
     const user = order.user as any;
     const shortId = id.slice(-8).toUpperCase();
 
@@ -99,8 +124,17 @@ export class OrdersController {
 
   @Get(':id')
   @UseGuards(JwtAuthGuard)
-  findOne(@Param('id') id: string) {
-    return this.ordersService.findOne(id);
+  async findOne(
+    @Param('id') id: string,
+    @CurrentUser('sub') userId: string,
+    @CurrentUser('role') role: string,
+  ) {
+    const order = await this.ordersService.findOne(id);
+    const orderUserId = (order.user as any)?._id?.toString() ?? order.user?.toString();
+    if (role !== 'admin' && orderUserId !== userId) {
+      throw new ForbiddenException('You can only view your own orders');
+    }
+    return order;
   }
 
   // Both users (own orders) and admins can cancel

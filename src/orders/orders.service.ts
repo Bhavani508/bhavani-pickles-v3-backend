@@ -238,6 +238,50 @@ export class OrdersService {
     return order.populate('items.product');
   }
 
+  // ── Shipping rate check (public, pre-checkout) ──────────────────────────────
+
+  async getShippingRates(deliveryPincode: string, weight = 0.5, cod = false) {
+    const pickupPincode = this.configService.get<string>('SHIPROCKET_PICKUP_PINCODE', '500001');
+    const result = await this.shiprocketService.checkServiceability(pickupPincode, deliveryPincode, weight, cod);
+
+    if (!result.available) {
+      return { available: false, shippingFee: 0, estimatedDelivery: null, couriers: [] };
+    }
+
+    // Pick cheapest courier
+    const sorted = result.couriers.sort((a, b) => a.rate - b.rate);
+    const cheapest = sorted[0];
+
+    return {
+      available: true,
+      shippingFee: cheapest.rate,
+      estimatedDelivery: cheapest.etd,
+      couriers: sorted.slice(0, 5).map(c => ({
+        name: c.name,
+        rate: c.rate,
+        etd: c.etd,
+      })),
+    };
+  }
+
+  // ── Guest order tracking ───────────────────────────────────────────────────
+
+  async trackGuestOrder(orderId: string, email: string) {
+    const order = await this.orderModel
+      .findById(orderId)
+      .populate('user', 'email')
+      .populate('items.product')
+      .exec();
+    if (!order) throw new NotFoundException('Order not found');
+
+    const userEmail = (order.user as any)?.email;
+    if (!userEmail || userEmail.toLowerCase() !== email.toLowerCase()) {
+      throw new NotFoundException('Order not found');
+    }
+
+    return order;
+  }
+
   // ── Deduct variant stock ──────────────────────────────────────────────────
   private async deductStock(
     items: Array<{ product: any; weight: string; quantity: number }>,
@@ -245,10 +289,19 @@ export class OrdersService {
     const affectedProductIds = new Set<string>();
     for (const item of items) {
       const productId = item.product._id?.toString() ?? item.product.toString();
-      await this.variantModel.updateOne(
-        { product: item.product._id ?? item.product, weight: item.weight },
+      const result = await this.variantModel.updateOne(
+        {
+          product: item.product._id ?? item.product,
+          weight: item.weight,
+          leftoverStock: { $gte: item.quantity },
+        },
         { $inc: { leftoverStock: -item.quantity } },
       );
+      if (result.modifiedCount === 0) {
+        throw new BadRequestException(
+          `Insufficient stock for ${item.weight} variant. Please try again.`,
+        );
+      }
       affectedProductIds.add(productId);
     }
 

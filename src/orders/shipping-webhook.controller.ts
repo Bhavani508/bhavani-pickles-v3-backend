@@ -20,6 +20,12 @@ export class ShippingWebhookController {
     @Headers('x-api-key') apiKey?: string,
   ) {
     const expectedToken = this.config.get<string>('SHIPROCKET_WEBHOOK_TOKEN');
+    const env = this.config.get<string>('NODE_ENV');
+
+    if (!expectedToken && env === 'production') {
+      this.logger.error('SHIPROCKET_WEBHOOK_TOKEN not configured in production — rejecting');
+      return { status: 'rejected' };
+    }
 
     if (expectedToken && apiKey !== expectedToken) {
       this.logger.warn('Shiprocket webhook: invalid token');
