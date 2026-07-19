@@ -31,6 +31,11 @@ export class OrdersWebhookController {
   ) {
     const secret = this.configService.get<string>('RAZORPAY_WEBHOOK_SECRET');
     if (!secret) {
+      const env = this.configService.get<string>('NODE_ENV');
+      if (env === 'production') {
+        this.logger.error('RAZORPAY_WEBHOOK_SECRET not configured in production — rejecting');
+        throw new BadRequestException('Webhook not configured');
+      }
       this.logger.warn('RAZORPAY_WEBHOOK_SECRET not configured — skipping webhook');
       return { status: 'ignored' };
     }

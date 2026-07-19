@@ -245,10 +245,19 @@ export class OrdersService {
     const affectedProductIds = new Set<string>();
     for (const item of items) {
       const productId = item.product._id?.toString() ?? item.product.toString();
-      await this.variantModel.updateOne(
-        { product: item.product._id ?? item.product, weight: item.weight },
+      const result = await this.variantModel.updateOne(
+        {
+          product: item.product._id ?? item.product,
+          weight: item.weight,
+          leftoverStock: { $gte: item.quantity },
+        },
         { $inc: { leftoverStock: -item.quantity } },
       );
+      if (result.modifiedCount === 0) {
+        throw new BadRequestException(
+          `Insufficient stock for ${item.weight} variant. Please try again.`,
+        );
+      }
       affectedProductIds.add(productId);
     }
 
