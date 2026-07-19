@@ -74,6 +74,23 @@ export class OrdersController {
     return this.ordersService.findAll({ status, page, limit });
   }
 
+  @Get('shipping-rates')
+  async getShippingRates(
+    @Query('pincode') pincode: string,
+    @Query('weight') weight?: string,
+    @Query('cod') cod?: string,
+  ) {
+    return this.ordersService.getShippingRates(pincode, Number(weight) || 0.5, cod === 'true');
+  }
+
+  @Get('track')
+  async trackGuestOrder(
+    @Query('orderId') orderId: string,
+    @Query('email') email: string,
+  ) {
+    return this.ordersService.trackGuestOrder(orderId, email);
+  }
+
   @Get(':id/invoice')
   @UseGuards(JwtAuthGuard)
   async downloadInvoice(

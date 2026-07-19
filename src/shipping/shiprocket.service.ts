@@ -205,6 +205,32 @@ export class ShiprocketService {
     return this.request<TrackingResponse>('GET', `/courier/track/shipment/${shipmentId}`);
   }
 
+  async checkServiceability(
+    pickupPincode: string,
+    deliveryPincode: string,
+    weight: number,
+    codEnabled: boolean,
+  ): Promise<{ available: boolean; couriers: Array<{ name: string; rate: number; etd: string; courier_company_id: number }> }> {
+    if (!this.isConfigured()) return { available: false, couriers: [] };
+
+    try {
+      const res = await this.request<any>('GET',
+        `/courier/serviceability/?pickup_postcode=${pickupPincode}&delivery_postcode=${deliveryPincode}&weight=${weight}&cod=${codEnabled ? 1 : 0}`
+      );
+
+      const couriers = (res?.data?.available_courier_companies ?? []).map((c: any) => ({
+        name: c.courier_name,
+        rate: c.freight_charge,
+        etd: c.etd,
+        courier_company_id: c.courier_company_id,
+      }));
+
+      return { available: couriers.length > 0, couriers };
+    } catch {
+      return { available: false, couriers: [] };
+    }
+  }
+
   async cancelOrder(shiprocketOrderId: number): Promise<any> {
     return this.request('POST', '/orders/cancel', {
       ids: [shiprocketOrderId],

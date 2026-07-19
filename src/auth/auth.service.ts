@@ -23,6 +23,12 @@ export class AuthService {
 
     this.emailService.sendWelcome({ name: user.name, email: user.email });
 
+    // Send email verification
+    const verifyToken = await this.usersService.createEmailVerificationToken(user.id);
+    const clientUrl = this.configService.get('FRONTEND_URL', 'https://www.bhavanipickles.com');
+    const verifyUrl = `${clientUrl}/auth/verify-email?token=${verifyToken}`;
+    this.emailService.sendVerificationEmail({ name: user.name, email: user.email, verifyUrl });
+
     return { user: this.sanitizeUser(user), ...tokens };
   }
 
@@ -85,6 +91,25 @@ export class AuthService {
 
   async resetPassword(token: string, newPassword: string): Promise<void> {
     return this.usersService.resetPassword(token, newPassword);
+  }
+
+  async verifyEmail(token: string) {
+    const user = await this.usersService.verifyEmail(token);
+    return { message: 'Email verified successfully', email: user.email };
+  }
+
+  async resendVerification(userId: string) {
+    const user = await this.usersService.findById(userId);
+    if (user.isEmailVerified) {
+      return { message: 'Email is already verified' };
+    }
+
+    const verifyToken = await this.usersService.createEmailVerificationToken(user.id);
+    const clientUrl = this.configService.get('FRONTEND_URL', 'https://www.bhavanipickles.com');
+    const verifyUrl = `${clientUrl}/auth/verify-email?token=${verifyToken}`;
+    this.emailService.sendVerificationEmail({ name: user.name, email: user.email, verifyUrl });
+
+    return { message: 'Verification email sent' };
   }
 
   private sanitizeUser(user: any) {
