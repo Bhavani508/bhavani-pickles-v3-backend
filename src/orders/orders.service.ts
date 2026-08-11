@@ -827,7 +827,7 @@ export class OrdersService {
   }
 
   // ── Cron: poll Shiprocket for shipment status updates ─────────────────────
-  @Cron(CronExpression.EVERY_30_MINUTES)
+  @Cron(CronExpression.EVERY_2_HOURS)
   async pollShiprocketStatuses() {
     const activeOrders = await this.orderModel.find({
       status: { $in: [OrderStatus.READY_TO_SHIP, OrderStatus.SHIPPED] },
