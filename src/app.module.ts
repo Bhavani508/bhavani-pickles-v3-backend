@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
+import { ScheduleModule } from '@nestjs/schedule';
 import { LoggerModule } from 'nestjs-pino';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
@@ -67,6 +68,7 @@ import { UploadModule } from './upload/upload.module';
       }),
       inject: [ConfigService],
     }),
+    ScheduleModule.forRoot(),
     AuthModule,
     UsersModule,
     ProductsModule,

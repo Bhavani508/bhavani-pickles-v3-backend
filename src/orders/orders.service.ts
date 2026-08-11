@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { ConfigService } from '@nestjs/config';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { Model, Types } from 'mongoose';
 import * as crypto from 'crypto';
 import * as bcrypt from 'bcryptjs';
@@ -822,6 +823,34 @@ export class OrdersService {
         orderId: (order._id as Types.ObjectId).toString(),
         status: mapped,
       });
+    }
+  }
+
+  // ── Cron: poll Shiprocket for shipment status updates ─────────────────────
+  @Cron(CronExpression.EVERY_30_MINUTES)
+  async pollShiprocketStatuses() {
+    const activeOrders = await this.orderModel.find({
+      status: { $in: [OrderStatus.READY_TO_SHIP, OrderStatus.SHIPPED] },
+      awbCode: { $exists: true, $ne: null },
+    });
+
+    if (!activeOrders.length) return;
+
+    this.logger.log(`Polling Shiprocket for ${activeOrders.length} active shipments`);
+
+    for (const order of activeOrders) {
+      try {
+        const tracking = await this.shiprocketService.getTracking(order.awbCode!);
+        const currentStatus = tracking.tracking_data?.shipment_track?.[0]?.current_status?.toLowerCase();
+        if (!currentStatus) continue;
+
+        await this.handleShiprocketWebhook({
+          awb: order.awbCode,
+          current_status: currentStatus,
+        });
+      } catch (err) {
+        this.logger.error(`Failed to poll tracking for order ${order._id}: ${err}`);
+      }
     }
   }
 
