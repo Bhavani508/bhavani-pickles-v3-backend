@@ -12,6 +12,7 @@ interface OrderCancelledData {
   totalAmount: number;
   reason?: string;
   cancelledBy: string;
+  refundInitiated?: boolean;
 }
 
 export function orderCancelledTemplate(data: OrderCancelledData): string {
@@ -28,6 +29,17 @@ export function orderCancelledTemplate(data: OrderCancelledData): string {
       </tr>`,
     )
     .join('');
+
+  const refundBlock = data.refundInitiated
+    ? `
+    <div style="background-color:#eff6ff;border-left:4px solid #2563eb;padding:12px 16px;border-radius:4px;margin-top:24px;">
+      <p style="margin:0;color:#2563eb;font-size:14px;font-weight:bold;">Refund In Process</p>
+      <p style="margin:8px 0 0;color:#666;font-size:13px;">
+        A refund of &#8377;${data.totalAmount.toFixed(2)} has been initiated to your original payment method.
+        It typically takes 5–7 business days to reflect in your account. You will receive another email once the refund is completed.
+      </p>
+    </div>`
+    : '';
 
   const content = `
     <h2 style="margin:0 0 8px;color:#333;font-size:20px;">Order Cancelled</h2>
@@ -53,6 +65,8 @@ export function orderCancelledTemplate(data: OrderCancelledData): string {
         <td style="padding:12px 0;text-align:right;font-weight:bold;font-size:15px;color:#dc2626;text-decoration:line-through;">&#8377;${data.totalAmount.toFixed(2)}</td>
       </tr>
     </table>
+
+    ${refundBlock}
 
     <p style="margin:24px 0 0;color:#666;font-size:13px;">
       If you have any questions, please contact our support team.
