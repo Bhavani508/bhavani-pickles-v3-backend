@@ -89,6 +89,19 @@ export class Order {
   @Prop()
   cancelledBy?: string; // 'user' or 'admin'
 
+  // Refund fields
+  @Prop()
+  razorpayRefundId?: string;
+
+  @Prop({ enum: ['pending', 'processed', 'failed'], default: undefined })
+  refundStatus?: string;
+
+  @Prop()
+  refundedAt?: Date;
+
+  @Prop({ min: 0 })
+  refundAmount?: number;
+
   // Shiprocket shipping fields
   @Prop()
   shiprocketOrderId?: number;

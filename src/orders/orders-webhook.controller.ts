@@ -71,6 +71,20 @@ export class OrdersWebhookController {
       );
     }
 
+    if (event.event === 'refund.processed') {
+      const refund = event.payload?.refund?.entity;
+      if (refund) {
+        await this.ordersService.handleRefundProcessed(refund.payment_id, refund.id);
+      }
+    }
+
+    if (event.event === 'refund.failed') {
+      const refund = event.payload?.refund?.entity;
+      if (refund) {
+        await this.ordersService.handleRefundFailed(refund.payment_id);
+      }
+    }
+
     // Always return 200 to Razorpay (even for events we don't handle)
     return { status: 'ok' };
   }

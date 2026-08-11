@@ -359,6 +359,36 @@ export class OrdersService {
     order.cancellationReason = dto.reason;
     order.cancelledAt = new Date();
     order.cancelledBy = role === 'admin' ? 'admin' : 'user';
+
+    // Initiate Razorpay refund if payment was made online
+    let refundInitiated = false;
+    if (order.isPaid && order.paymentType === 'online' && order.razorpayPaymentId) {
+      try {
+        const refund = await this.razorpay.payments.refund(order.razorpayPaymentId, {
+          amount: order.totalAmount * 100,
+          speed: 'normal',
+          notes: { orderId, reason: dto.reason || 'Order cancelled' },
+        });
+        order.razorpayRefundId = refund.id;
+        order.refundStatus = 'pending';
+        order.refundAmount = order.totalAmount;
+        refundInitiated = true;
+        this.logger.log(`Refund initiated: ${refund.id} for order ${orderId}`);
+      } catch (err) {
+        this.logger.error(`Failed to initiate refund for order ${orderId}: ${err}`);
+      }
+    }
+
+    // Cancel Shiprocket order if it was created
+    if (order.shiprocketOrderId) {
+      try {
+        await this.shiprocketService.cancelOrder(order.shiprocketOrderId);
+        this.logger.log(`Shiprocket order ${order.shiprocketOrderId} cancelled for order ${orderId}`);
+      } catch (err) {
+        this.logger.error(`Failed to cancel Shiprocket order ${order.shiprocketOrderId}: ${err}`);
+      }
+    }
+
     await order.save();
 
     const user = await this.userModel.findById(order.user);
@@ -376,6 +406,7 @@ export class OrdersService {
         totalAmount: order.totalAmount,
         reason: dto.reason,
         cancelledBy: order.cancelledBy!,
+        refundInitiated,
       });
     }
 
@@ -450,6 +481,39 @@ export class OrdersService {
         paymentType: 'online',
       });
     }
+  }
+
+  // ── Webhook: handle Razorpay refund.processed event ──────────────────────
+  async handleRefundProcessed(razorpayPaymentId: string, refundId: string) {
+    const order = await this.orderModel.findOne({ razorpayPaymentId });
+    if (!order) return;
+
+    if (order.refundStatus === 'processed') return;
+
+    order.refundStatus = 'processed';
+    order.refundedAt = new Date();
+    if (!order.razorpayRefundId) order.razorpayRefundId = refundId;
+    await order.save();
+
+    const user = await this.userModel.findById(order.user);
+    if (user) {
+      this.emailService.sendRefundCompleted({
+        customerName: user.name,
+        customerEmail: user.email,
+        orderId: order._id.toString(),
+        refundAmount: order.refundAmount ?? order.totalAmount,
+      });
+    }
+  }
+
+  // ── Webhook: handle Razorpay refund.failed event ────────────────────────
+  async handleRefundFailed(razorpayPaymentId: string) {
+    const order = await this.orderModel.findOne({ razorpayPaymentId });
+    if (!order) return;
+
+    order.refundStatus = 'failed';
+    await order.save();
+    this.logger.error(`Refund failed for order ${order._id}`);
   }
 
   async findAll(query?: {
