@@ -15,6 +15,11 @@ const statusConfig: Record<
     color: '#f59e0b',
     message: 'Your order is being prepared and will be shipped soon.',
   },
+  ready_to_ship: {
+    label: 'Ready to Ship',
+    color: '#8b5cf6',
+    message: 'Your order is packed and ready for pickup by our courier partner. You will be notified once it is shipped.',
+  },
   shipped: {
     label: 'Shipped',
     color: '#3b82f6',

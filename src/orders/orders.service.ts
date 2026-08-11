@@ -330,6 +330,7 @@ export class OrdersService {
     OrderStatus.PENDING,
     OrderStatus.CONFIRMED,
     OrderStatus.PROCESSING,
+    OrderStatus.READY_TO_SHIP,
   ];
 
   async cancelOrder(
@@ -348,7 +349,7 @@ export class OrdersService {
 
     if (!OrdersService.CANCELLABLE_STATUSES.includes(order.status)) {
       throw new BadRequestException(
-        `Order cannot be cancelled — current status is "${order.status}". Only orders that are pending, confirmed, or processing can be cancelled.`,
+        `Order cannot be cancelled — current status is "${order.status}". Only orders that are pending, confirmed, processing, or ready to ship can be cancelled.`,
       );
     }
 
@@ -559,13 +560,28 @@ export class OrdersService {
     return order;
   }
 
+  private static ADMIN_SETTABLE_STATUSES = [
+    OrderStatus.CONFIRMED,
+    OrderStatus.PROCESSING,
+    OrderStatus.READY_TO_SHIP,
+  ];
+
   async updateStatus(id: string, dto: UpdateOrderStatusDto) {
-    const order = await this.orderModel.findByIdAndUpdate(
-      id,
-      { status: dto.status },
-      { new: true },
-    );
+    if (!OrdersService.ADMIN_SETTABLE_STATUSES.includes(dto.status)) {
+      throw new BadRequestException(
+        `Status "${dto.status}" cannot be set manually. Shipped and delivered are updated automatically by Shiprocket.`,
+      );
+    }
+
+    const order = await this.orderModel.findById(id);
     if (!order) throw new NotFoundException('Order not found');
+
+    if (dto.status === OrderStatus.READY_TO_SHIP) {
+      return this.shipOrder(id);
+    }
+
+    order.status = dto.status;
+    await order.save();
 
     const user = await this.userModel.findById(order.user);
     if (user) {
@@ -635,7 +651,7 @@ export class OrdersService {
     };
   }
 
-  // ── Shiprocket: Ship an order ─────────────────────────────────────────────
+  // ── Shiprocket: Create order and mark ready to ship ───────────────────────
 
   async shipOrder(orderId: string) {
     const order = await this.orderModel
@@ -713,7 +729,7 @@ export class OrdersService {
         // Non-fatal — order may not be cancellable yet
       }
 
-      order.status = OrderStatus.SHIPPED;
+      order.status = OrderStatus.READY_TO_SHIP;
       await order.save();
       return {
         ...(await order.populate('items.product')).toObject(),
@@ -722,19 +738,15 @@ export class OrdersService {
       };
     }
 
-    // Update status to shipped if courier was assigned
-    if (order.awbCode) {
-      order.status = OrderStatus.SHIPPED;
+    order.status = OrderStatus.READY_TO_SHIP;
 
-      // Send email notification
-      if (user?.email) {
-        this.emailService.sendOrderStatusUpdate({
-          customerName: user.name,
-          customerEmail: user.email,
-          orderId,
-          status: 'shipped',
-        });
-      }
+    if (user?.email) {
+      this.emailService.sendOrderStatusUpdate({
+        customerName: user.name,
+        customerEmail: user.email,
+        orderId,
+        status: 'ready_to_ship',
+      });
     }
 
     await order.save();
@@ -794,7 +806,7 @@ export class OrdersService {
     // Only allow forward progression (don't go backwards)
     const progression = [
       OrderStatus.PENDING, OrderStatus.CONFIRMED, OrderStatus.PROCESSING,
-      OrderStatus.SHIPPED, OrderStatus.DELIVERED,
+      OrderStatus.READY_TO_SHIP, OrderStatus.SHIPPED, OrderStatus.DELIVERED,
     ];
     const currentIdx = progression.indexOf(order.status);
     const newIdx = progression.indexOf(mapped);
