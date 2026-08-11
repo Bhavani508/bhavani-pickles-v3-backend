@@ -7,6 +7,7 @@ import { orderStatusUpdateTemplate } from './templates/order-status-update';
 import { welcomeTemplate } from './templates/welcome';
 import { resetPasswordTemplate } from './templates/reset-password';
 import { verifyEmailTemplate } from './templates/verify-email';
+import { refundCompletedTemplate } from './templates/refund-completed';
 
 export interface SendEmailOptions {
   to: string | string[];
@@ -101,6 +102,7 @@ export class EmailService {
     totalAmount: number;
     reason?: string;
     cancelledBy: string;
+    refundInitiated?: boolean;
   }) {
     return this.sendEmail({
       to: order.customerEmail,
@@ -148,6 +150,23 @@ export class EmailService {
       to: data.email,
       subject: 'Reset Your Password – Bhavani Pickles',
       html: resetPasswordTemplate({ name: data.name, resetUrl: data.resetUrl }),
+    });
+  }
+
+  async sendRefundCompleted(data: {
+    customerName: string;
+    customerEmail: string;
+    orderId: string;
+    refundAmount: number;
+  }) {
+    return this.sendEmail({
+      to: data.customerEmail,
+      subject: `Refund Processed - #${data.orderId}`,
+      html: refundCompletedTemplate({
+        customerName: data.customerName,
+        orderId: data.orderId,
+        refundAmount: data.refundAmount,
+      }),
     });
   }
 }

@@ -8,6 +8,7 @@ export enum OrderStatus {
   PENDING = 'pending',
   CONFIRMED = 'confirmed',
   PROCESSING = 'processing',
+  READY_TO_SHIP = 'ready_to_ship',
   SHIPPED = 'shipped',
   DELIVERED = 'delivered',
   CANCELLED = 'cancelled',
@@ -88,6 +89,19 @@ export class Order {
 
   @Prop()
   cancelledBy?: string; // 'user' or 'admin'
+
+  // Refund fields
+  @Prop()
+  razorpayRefundId?: string;
+
+  @Prop({ enum: ['pending', 'processed', 'failed'], default: undefined })
+  refundStatus?: string;
+
+  @Prop()
+  refundedAt?: Date;
+
+  @Prop({ min: 0 })
+  refundAmount?: number;
 
   // Shiprocket shipping fields
   @Prop()

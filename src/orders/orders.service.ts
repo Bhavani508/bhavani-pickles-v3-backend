@@ -359,6 +359,36 @@ export class OrdersService {
     order.cancellationReason = dto.reason;
     order.cancelledAt = new Date();
     order.cancelledBy = role === 'admin' ? 'admin' : 'user';
+
+    // Initiate Razorpay refund if payment was made online
+    let refundInitiated = false;
+    if (order.isPaid && order.paymentType === 'online' && order.razorpayPaymentId) {
+      try {
+        const refund = await this.razorpay.payments.refund(order.razorpayPaymentId, {
+          amount: order.totalAmount * 100,
+          speed: 'normal',
+          notes: { orderId, reason: dto.reason || 'Order cancelled' },
+        });
+        order.razorpayRefundId = refund.id;
+        order.refundStatus = 'pending';
+        order.refundAmount = order.totalAmount;
+        refundInitiated = true;
+        this.logger.log(`Refund initiated: ${refund.id} for order ${orderId}`);
+      } catch (err) {
+        this.logger.error(`Failed to initiate refund for order ${orderId}: ${err}`);
+      }
+    }
+
+    // Cancel Shiprocket order if it was created
+    if (order.shiprocketOrderId) {
+      try {
+        await this.shiprocketService.cancelOrder(order.shiprocketOrderId);
+        this.logger.log(`Shiprocket order ${order.shiprocketOrderId} cancelled for order ${orderId}`);
+      } catch (err) {
+        this.logger.error(`Failed to cancel Shiprocket order ${order.shiprocketOrderId}: ${err}`);
+      }
+    }
+
     await order.save();
 
     const user = await this.userModel.findById(order.user);
@@ -376,6 +406,7 @@ export class OrdersService {
         totalAmount: order.totalAmount,
         reason: dto.reason,
         cancelledBy: order.cancelledBy!,
+        refundInitiated,
       });
     }
 
@@ -452,6 +483,39 @@ export class OrdersService {
     }
   }
 
+  // ── Webhook: handle Razorpay refund.processed event ──────────────────────
+  async handleRefundProcessed(razorpayPaymentId: string, refundId: string) {
+    const order = await this.orderModel.findOne({ razorpayPaymentId });
+    if (!order) return;
+
+    if (order.refundStatus === 'processed') return;
+
+    order.refundStatus = 'processed';
+    order.refundedAt = new Date();
+    if (!order.razorpayRefundId) order.razorpayRefundId = refundId;
+    await order.save();
+
+    const user = await this.userModel.findById(order.user);
+    if (user) {
+      this.emailService.sendRefundCompleted({
+        customerName: user.name,
+        customerEmail: user.email,
+        orderId: order._id.toString(),
+        refundAmount: order.refundAmount ?? order.totalAmount,
+      });
+    }
+  }
+
+  // ── Webhook: handle Razorpay refund.failed event ────────────────────────
+  async handleRefundFailed(razorpayPaymentId: string) {
+    const order = await this.orderModel.findOne({ razorpayPaymentId });
+    if (!order) return;
+
+    order.refundStatus = 'failed';
+    await order.save();
+    this.logger.error(`Refund failed for order ${order._id}`);
+  }
+
   async findAll(query?: {
     status?: string;
     page?: number;
@@ -495,13 +559,28 @@ export class OrdersService {
     return order;
   }
 
+  private static ADMIN_SETTABLE_STATUSES = [
+    OrderStatus.CONFIRMED,
+    OrderStatus.PROCESSING,
+    OrderStatus.READY_TO_SHIP,
+  ];
+
   async updateStatus(id: string, dto: UpdateOrderStatusDto) {
-    const order = await this.orderModel.findByIdAndUpdate(
-      id,
-      { status: dto.status },
-      { new: true },
-    );
+    if (!OrdersService.ADMIN_SETTABLE_STATUSES.includes(dto.status)) {
+      throw new BadRequestException(
+        `Status "${dto.status}" cannot be set manually. Shipped and delivered are updated automatically by Shiprocket.`,
+      );
+    }
+
+    const order = await this.orderModel.findById(id);
     if (!order) throw new NotFoundException('Order not found');
+
+    if (dto.status === OrderStatus.READY_TO_SHIP) {
+      return this.shipOrder(id);
+    }
+
+    order.status = dto.status;
+    await order.save();
 
     const user = await this.userModel.findById(order.user);
     if (user) {
@@ -571,7 +650,7 @@ export class OrdersService {
     };
   }
 
-  // ── Shiprocket: Ship an order ─────────────────────────────────────────────
+  // ── Shiprocket: Create order and mark ready to ship ───────────────────────
 
   async shipOrder(orderId: string) {
     const order = await this.orderModel
@@ -649,7 +728,7 @@ export class OrdersService {
         // Non-fatal — order may not be cancellable yet
       }
 
-      order.status = OrderStatus.SHIPPED;
+      order.status = OrderStatus.READY_TO_SHIP;
       await order.save();
       return {
         ...(await order.populate('items.product')).toObject(),
@@ -658,19 +737,15 @@ export class OrdersService {
       };
     }
 
-    // Update status to shipped if courier was assigned
-    if (order.awbCode) {
-      order.status = OrderStatus.SHIPPED;
+    order.status = OrderStatus.READY_TO_SHIP;
 
-      // Send email notification
-      if (user?.email) {
-        this.emailService.sendOrderStatusUpdate({
-          customerName: user.name,
-          customerEmail: user.email,
-          orderId,
-          status: 'shipped',
-        });
-      }
+    if (user?.email) {
+      this.emailService.sendOrderStatusUpdate({
+        customerName: user.name,
+        customerEmail: user.email,
+        orderId,
+        status: 'ready_to_ship',
+      });
     }
 
     await order.save();
@@ -730,7 +805,7 @@ export class OrdersService {
     // Only allow forward progression (don't go backwards)
     const progression = [
       OrderStatus.PENDING, OrderStatus.CONFIRMED, OrderStatus.PROCESSING,
-      OrderStatus.SHIPPED, OrderStatus.DELIVERED,
+      OrderStatus.READY_TO_SHIP, OrderStatus.SHIPPED, OrderStatus.DELIVERED,
     ];
     const currentIdx = progression.indexOf(order.status);
     const newIdx = progression.indexOf(mapped);
