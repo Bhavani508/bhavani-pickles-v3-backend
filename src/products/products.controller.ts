@@ -16,19 +16,33 @@ export class ProductsController {
   @Get()
   @ApiQuery({ name: 'category', required: false })
   @ApiQuery({ name: 'search', required: false })
+  @ApiQuery({ name: 'tag', required: false })
   @ApiQuery({ name: 'minPrice', required: false, type: Number })
   @ApiQuery({ name: 'maxPrice', required: false, type: Number })
+  @ApiQuery({ name: 'sort', required: false })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   findAll(
     @Query('category') category?: string,
     @Query('search') search?: string,
+    @Query('tag') tag?: string,
     @Query('minPrice') minPrice?: number,
     @Query('maxPrice') maxPrice?: number,
+    @Query('sort') sort?: string,
     @Query('page') page?: number,
     @Query('limit') limit?: number,
   ) {
-    return this.productsService.findAll({ category, search, minPrice, maxPrice, page, limit });
+    return this.productsService.findAll({ category, search, tag, minPrice, maxPrice, sort, page, limit });
+  }
+
+  @Get('tags')
+  getTags() {
+    return this.productsService.getDistinctTags();
+  }
+
+  @Get('best-sellers')
+  getBestSellers() {
+    return this.productsService.getBestSellers();
   }
 
   @Get(':id')
@@ -50,6 +64,14 @@ export class ProductsController {
   @Roles(Role.ADMIN)
   update(@Param('id') id: string, @Body() dto: UpdateProductDto) {
     return this.productsService.update(id, dto);
+  }
+
+  @Patch(':id/best-seller')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  toggleBestSeller(@Param('id') id: string) {
+    return this.productsService.toggleBestSeller(id);
   }
 
   @Delete(':id')

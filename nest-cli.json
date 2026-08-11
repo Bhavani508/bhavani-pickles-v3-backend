@@ -3,6 +3,10 @@
   "collection": "@nestjs/schematics",
   "sourceRoot": "src",
   "compilerOptions": {
-    "deleteOutDir": true
+    "deleteOutDir": true,
+    "assets": [
+      { "include": "orders/logo.png", "outDir": "dist" },
+      { "include": "orders/fonts/*.ttf", "outDir": "dist" }
+    ]
   }
 }

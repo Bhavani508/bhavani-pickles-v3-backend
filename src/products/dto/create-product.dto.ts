@@ -74,4 +74,9 @@ export class CreateProductDto {
   @IsOptional()
   @IsBoolean()
   isOutOfStock?: boolean;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  isBestSeller?: boolean;
 }

@@ -1,8 +1,10 @@
-import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 import { v2 as cloudinary } from 'cloudinary';
 
 @Injectable()
 export class UploadService {
+  private readonly logger = new Logger(UploadService.name);
+
   constructor() {
     cloudinary.config({
       cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -22,7 +24,7 @@ export class UploadService {
       );
       uploadStream.end(file.buffer);
     }).catch((error) => {
-      console.error('Cloudinary upload error:', error);
+      this.logger.error('Cloudinary upload error', error);
       throw new InternalServerErrorException(`Upload failed: ${error?.message || error}`);
     }) as Promise<string>;
   }

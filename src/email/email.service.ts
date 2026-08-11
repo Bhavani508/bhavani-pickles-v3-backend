@@ -6,6 +6,7 @@ import { orderCancelledTemplate } from './templates/order-cancelled';
 import { orderStatusUpdateTemplate } from './templates/order-status-update';
 import { welcomeTemplate } from './templates/welcome';
 import { resetPasswordTemplate } from './templates/reset-password';
+import { verifyEmailTemplate } from './templates/verify-email';
 
 export interface SendEmailOptions {
   to: string | string[];
@@ -131,6 +132,14 @@ export class EmailService {
       to: user.email,
       subject: 'Welcome to Bhavani Pickles!',
       html: welcomeTemplate(user),
+    });
+  }
+
+  async sendVerificationEmail(data: { name: string; email: string; verifyUrl: string }) {
+    return this.sendEmail({
+      to: data.email,
+      subject: 'Verify Your Email – Bhavani Pickles',
+      html: verifyEmailTemplate({ name: data.name, verifyUrl: data.verifyUrl }),
     });
   }
 

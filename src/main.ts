@@ -1,10 +1,22 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { Logger } from 'nestjs-pino';
+import helmet from 'helmet';
 import { AppModule } from './app.module';
+import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, {
+    bufferLogs: true,
+    rawBody: true,
+  });
+
+  // Use Pino logger for all NestJS logging
+  app.useLogger(app.get(Logger));
+
+  // Global exception filter
+  app.useGlobalFilters(new AllExceptionsFilter());
 
   // Global validation pipe
   app.useGlobalPipes(
@@ -15,9 +27,15 @@ async function bootstrap() {
     }),
   );
 
+  // Security headers
+  app.use(helmet());
+
   // CORS
+  const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:4200')
+    .split(',')
+    .map(u => u.trim());
   app.enableCors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:4200',
+    origin: allowedOrigins,
     credentials: true,
   });
 
@@ -36,8 +54,10 @@ async function bootstrap() {
 
   const port = process.env.PORT || 3000;
   await app.listen(port);
-  console.log(`Application running on: http://localhost:${port}`);
-  console.log(`Swagger docs: http://localhost:${port}/api/docs`);
+
+  const logger = app.get(Logger);
+  logger.log(`Application running on: http://localhost:${port}`);
+  logger.log(`Swagger docs: http://localhost:${port}/api/docs`);
 }
 
 bootstrap();

@@ -23,6 +23,12 @@ export class AuthService {
 
     this.emailService.sendWelcome({ name: user.name, email: user.email });
 
+    // Send email verification
+    const verifyToken = await this.usersService.createEmailVerificationToken(user.id);
+    const clientUrl = this.configService.get('FRONTEND_URL', 'https://www.bhavanipickles.com');
+    const verifyUrl = `${clientUrl}/auth/verify-email?token=${verifyToken}`;
+    this.emailService.sendVerificationEmail({ name: user.name, email: user.email, verifyUrl });
+
     return { user: this.sanitizeUser(user), ...tokens };
   }
 
@@ -57,21 +63,17 @@ export class AuthService {
     return { accessToken, refreshToken };
   }
 
-  async refreshToken(refreshToken: string) {
+  async refreshToken(oldRefreshToken: string) {
     try {
-      const payload = await this.jwtService.verifyAsync(refreshToken, {
+      const payload = await this.jwtService.verifyAsync(oldRefreshToken, {
         secret: this.configService.get('JWT_REFRESH_SECRET'),
       });
       const user = await this.usersService.findById(payload.sub);
       if (!user || !user.isActive) throw new UnauthorizedException();
-      const accessToken = await this.jwtService.signAsync(
-        { sub: user.id, email: user.email, role: user.role },
-        {
-          secret: this.configService.get('JWT_SECRET'),
-          expiresIn: this.configService.get('JWT_EXPIRES_IN', '15m'),
-        },
-      );
-      return { accessToken };
+
+      // Rotate: issue both new access and refresh tokens
+      const tokens = await this.generateTokens(user.id, user.email, user.role);
+      return tokens;
     } catch {
       throw new UnauthorizedException('Invalid refresh token');
     }
@@ -81,7 +83,7 @@ export class AuthService {
     const result = await this.usersService.createPasswordResetToken(email);
     if (!result) return; // don't reveal whether email exists
 
-    const clientUrl = this.configService.get('CLIENT_URL', 'https://www.bhavanipickles.com');
+    const clientUrl = this.configService.get('FRONTEND_URL', 'https://www.bhavanipickles.com');
     const resetUrl = `${clientUrl}/auth/reset-password?token=${result.token}`;
 
     this.emailService.sendPasswordReset({ name: result.name, email, resetUrl });
@@ -89,6 +91,25 @@ export class AuthService {
 
   async resetPassword(token: string, newPassword: string): Promise<void> {
     return this.usersService.resetPassword(token, newPassword);
+  }
+
+  async verifyEmail(token: string) {
+    const user = await this.usersService.verifyEmail(token);
+    return { message: 'Email verified successfully', email: user.email };
+  }
+
+  async resendVerification(userId: string) {
+    const user = await this.usersService.findById(userId);
+    if (user.isEmailVerified) {
+      return { message: 'Email is already verified' };
+    }
+
+    const verifyToken = await this.usersService.createEmailVerificationToken(user.id);
+    const clientUrl = this.configService.get('FRONTEND_URL', 'https://www.bhavanipickles.com');
+    const verifyUrl = `${clientUrl}/auth/verify-email?token=${verifyToken}`;
+    this.emailService.sendVerificationEmail({ name: user.name, email: user.email, verifyUrl });
+
+    return { message: 'Verification email sent' };
   }
 
   private sanitizeUser(user: any) {

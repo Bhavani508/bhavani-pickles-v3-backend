@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
@@ -22,9 +23,11 @@ import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { VerifyPaymentDto } from './dto/verify-payment.dto';
 import { CancelOrderDto } from './dto/cancel-order.dto';
 import { EmailService } from '../email/email.service';
+import { ShiprocketService } from '../shipping/shiprocket.service';
 
 @Injectable()
 export class OrdersService {
+  private readonly logger = new Logger(OrdersService.name);
   private razorpay: Razorpay;
 
   constructor(
@@ -36,6 +39,7 @@ export class OrdersService {
     @InjectModel(User.name) private userModel: Model<UserDocument>,
     private configService: ConfigService,
     private emailService: EmailService,
+    private shiprocketService: ShiprocketService,
   ) {
     this.razorpay = new Razorpay({
       key_id: this.configService.get<string>('RAZORPAY_KEY_ID')!,
@@ -199,6 +203,11 @@ export class OrdersService {
       throw new BadRequestException('Invalid payment signature');
     }
 
+    // Already confirmed by webhook — just return the order
+    if (order.isPaid) {
+      return order.populate('items.product');
+    }
+
     order.isPaid = true;
     order.paidAt = new Date();
     order.status = OrderStatus.CONFIRMED;
@@ -229,6 +238,50 @@ export class OrdersService {
     return order.populate('items.product');
   }
 
+  // ── Shipping rate check (public, pre-checkout) ──────────────────────────────
+
+  async getShippingRates(deliveryPincode: string, weight = 0.5, cod = false) {
+    const pickupPincode = this.configService.get<string>('SHIPROCKET_PICKUP_PINCODE', '500001');
+    const result = await this.shiprocketService.checkServiceability(pickupPincode, deliveryPincode, weight, cod);
+
+    if (!result.available) {
+      return { available: false, shippingFee: 0, estimatedDelivery: null, couriers: [] };
+    }
+
+    // Pick cheapest courier
+    const sorted = result.couriers.sort((a, b) => a.rate - b.rate);
+    const cheapest = sorted[0];
+
+    return {
+      available: true,
+      shippingFee: cheapest.rate,
+      estimatedDelivery: cheapest.etd,
+      couriers: sorted.slice(0, 5).map(c => ({
+        name: c.name,
+        rate: c.rate,
+        etd: c.etd,
+      })),
+    };
+  }
+
+  // ── Guest order tracking ───────────────────────────────────────────────────
+
+  async trackGuestOrder(orderId: string, email: string) {
+    const order = await this.orderModel
+      .findById(orderId)
+      .populate('user', 'email')
+      .populate('items.product')
+      .exec();
+    if (!order) throw new NotFoundException('Order not found');
+
+    const userEmail = (order.user as any)?.email;
+    if (!userEmail || userEmail.toLowerCase() !== email.toLowerCase()) {
+      throw new NotFoundException('Order not found');
+    }
+
+    return order;
+  }
+
   // ── Deduct variant stock ──────────────────────────────────────────────────
   private async deductStock(
     items: Array<{ product: any; weight: string; quantity: number }>,
@@ -236,10 +289,19 @@ export class OrdersService {
     const affectedProductIds = new Set<string>();
     for (const item of items) {
       const productId = item.product._id?.toString() ?? item.product.toString();
-      await this.variantModel.updateOne(
-        { product: item.product._id ?? item.product, weight: item.weight },
+      const result = await this.variantModel.updateOne(
+        {
+          product: item.product._id ?? item.product,
+          weight: item.weight,
+          leftoverStock: { $gte: item.quantity },
+        },
         { $inc: { leftoverStock: -item.quantity } },
       );
+      if (result.modifiedCount === 0) {
+        throw new BadRequestException(
+          `Insufficient stock for ${item.weight} variant. Please try again.`,
+        );
+      }
       affectedProductIds.add(productId);
     }
 
@@ -348,13 +410,71 @@ export class OrdersService {
     }
   }
 
-  findAll() {
-    return this.orderModel
-      .find()
-      .populate('user', 'name email')
-      .populate('items.product')
-      .sort({ createdAt: -1 })
-      .exec();
+  // ── Webhook: handle Razorpay payment.captured event ──────────────────────
+  async handlePaymentCaptured(
+    razorpayOrderId: string,
+    razorpayPaymentId: string,
+  ) {
+    const order = await this.orderModel.findOne({ razorpayOrderId });
+    if (!order) {
+      // Order not found for this Razorpay order — ignore (could be a different system)
+      return;
+    }
+
+    // Already processed (e.g. frontend verify-payment was faster)
+    if (order.isPaid) return;
+
+    order.isPaid = true;
+    order.paidAt = new Date();
+    order.status = OrderStatus.CONFIRMED;
+    order.razorpayPaymentId = razorpayPaymentId;
+    await order.save();
+
+    await this.deductStock(order.items as any[]);
+    await this.clearServerCart(order.user as Types.ObjectId);
+
+    const user = await this.userModel.findById(order.user);
+    if (user) {
+      this.emailService.sendOrderConfirmation({
+        customerName: user.name,
+        customerEmail: user.email,
+        orderId: (order._id as Types.ObjectId).toString(),
+        items: (order.items as any[]).map((i) => ({
+          name: i.name,
+          weight: i.weight,
+          quantity: i.quantity,
+          price: i.price,
+        })),
+        totalAmount: order.totalAmount,
+        shippingAddress: order.shippingAddress,
+        paymentType: 'online',
+      });
+    }
+  }
+
+  async findAll(query?: {
+    status?: string;
+    page?: number;
+    limit?: number;
+  }) {
+    const { status, page = 1, limit = 20 } = query ?? {};
+    const filter: any = {};
+    if (status) filter.status = status;
+
+    const skip = (page - 1) * limit;
+    const [items, total] = await Promise.all([
+      this.orderModel
+        .find(filter)
+        .populate('user', 'name email')
+        .populate('items.product')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .exec(),
+      this.orderModel.countDocuments(filter),
+    ]);
+
+    return { items, total, page, limit, pages: Math.ceil(total / limit) };
   }
 
   findByUser(userId: string) {
@@ -394,5 +514,248 @@ export class OrdersService {
     }
 
     return order;
+  }
+
+  async getDashboardStats() {
+    const now = new Date();
+    const sevenDaysAgo = new Date(now);
+    sevenDaysAgo.setDate(now.getDate() - 6);
+    sevenDaysAgo.setHours(0, 0, 0, 0);
+
+    const [totals, daily, statusBreakdown] = await Promise.all([
+      // Total revenue and count
+      this.orderModel.aggregate([
+        { $group: { _id: null, totalRevenue: { $sum: '$totalAmount' }, totalOrders: { $sum: 1 } } },
+      ]),
+      // Daily orders and revenue for last 7 days
+      this.orderModel.aggregate([
+        { $match: { createdAt: { $gte: sevenDaysAgo } } },
+        {
+          $group: {
+            _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+            orders: { $sum: 1 },
+            revenue: { $sum: '$totalAmount' },
+          },
+        },
+        { $sort: { _id: 1 } },
+      ]),
+      // Orders by status
+      this.orderModel.aggregate([
+        { $group: { _id: '$status', count: { $sum: 1 } } },
+      ]),
+    ]);
+
+    // Fill in missing days
+    const dailyMap = new Map(daily.map((d: any) => [d._id, d]));
+    const dailyData: { date: string; orders: number; revenue: number }[] = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(sevenDaysAgo);
+      d.setDate(sevenDaysAgo.getDate() + i);
+      const key = d.toISOString().slice(0, 10);
+      const entry = dailyMap.get(key);
+      dailyData.push({
+        date: key,
+        orders: entry?.orders ?? 0,
+        revenue: entry?.revenue ?? 0,
+      });
+    }
+
+    return {
+      totalOrders: totals[0]?.totalOrders ?? 0,
+      totalRevenue: totals[0]?.totalRevenue ?? 0,
+      daily: dailyData,
+      statusBreakdown: statusBreakdown.map((s: any) => ({
+        status: s._id,
+        count: s.count,
+      })),
+    };
+  }
+
+  // ── Shiprocket: Ship an order ─────────────────────────────────────────────
+
+  async shipOrder(orderId: string) {
+    const order = await this.orderModel
+      .findById(orderId)
+      .populate('user', 'name email phone')
+      .exec();
+    if (!order) throw new NotFoundException('Order not found');
+
+    if (order.status === 'cancelled')
+      throw new BadRequestException('Cannot ship a cancelled order');
+    if (order.shiprocketOrderId)
+      throw new BadRequestException('Order already submitted to Shiprocket');
+
+    const user = order.user as any;
+    const addr = order.shippingAddress;
+    const createdAt = (order as any).createdAt as Date;
+
+    // Create order on Shiprocket
+    const srOrder = await this.shiprocketService.createOrder({
+      orderId: orderId,
+      orderDate: this.formatDate(createdAt),
+      customerName: user?.name ?? 'Customer',
+      customerEmail: user?.email ?? '',
+      customerPhone: addr.phone ?? user?.phone ?? '',
+      shippingAddress: addr.street,
+      shippingCity: addr.city,
+      shippingState: addr.state,
+      shippingPincode: addr.pincode,
+      shippingCountry: addr.country || 'India',
+      items: (order.items as any[]).map((item) => ({
+        name: item.name,
+        sku: `${item.product?.toString()?.slice(-8) ?? 'PROD'}-${item.weight}`,
+        units: item.quantity,
+        sellingPrice: item.price,
+      })),
+      paymentMethod: order.paymentType === 'COD' ? 'COD' : 'Prepaid',
+      subTotal: order.totalAmount,
+      weight: 0.5, // default weight in kg
+      length: 20,
+      breadth: 15,
+      height: 10,
+    });
+
+    this.logger.log(`Shiprocket createOrder response: ${JSON.stringify(srOrder)}`);
+
+    order.shiprocketOrderId = srOrder.order_id;
+    order.shiprocketShipmentId = srOrder.shipment_id;
+
+    // Auto-assign courier
+    try {
+      const courierRes = await this.shiprocketService.assignCourier(srOrder.shipment_id);
+      const courierData = courierRes.response?.data;
+      if (courierData) {
+        order.awbCode = courierData.awb_code;
+        order.courierName = courierData.courier_name;
+      }
+    } catch (e) {
+      // Courier assignment can fail if no courier is serviceable — save what we have
+    }
+
+    // Schedule pickup
+    try {
+      await this.shiprocketService.generatePickup(srOrder.shipment_id);
+    } catch {
+      // Non-fatal
+    }
+
+    const isProduction = this.configService.get<string>('NODE_ENV') === 'production';
+
+    // In non-production environments, cancel the Shiprocket order immediately
+    if (!isProduction) {
+      try {
+        await this.shiprocketService.cancelOrder(srOrder.order_id);
+      } catch {
+        // Non-fatal — order may not be cancellable yet
+      }
+
+      order.status = OrderStatus.SHIPPED;
+      await order.save();
+      return {
+        ...(await order.populate('items.product')).toObject(),
+        _testMode: true,
+        _message: 'Shiprocket order created and cancelled immediately (test mode)',
+      };
+    }
+
+    // Update status to shipped if courier was assigned
+    if (order.awbCode) {
+      order.status = OrderStatus.SHIPPED;
+
+      // Send email notification
+      if (user?.email) {
+        this.emailService.sendOrderStatusUpdate({
+          customerName: user.name,
+          customerEmail: user.email,
+          orderId,
+          status: 'shipped',
+        });
+      }
+    }
+
+    await order.save();
+    return order.populate('items.product');
+  }
+
+  // ── Get live tracking from Shiprocket ─────────────────────────────────────
+
+  async getShipmentTracking(orderId: string) {
+    const order = await this.orderModel.findById(orderId).lean().exec();
+    if (!order) throw new NotFoundException('Order not found');
+
+    if (order.awbCode) {
+      return this.shiprocketService.getTracking(order.awbCode);
+    }
+    if (order.shiprocketShipmentId) {
+      return this.shiprocketService.getTrackingByShipment(order.shiprocketShipmentId);
+    }
+
+    throw new BadRequestException('No shipping info available for this order');
+  }
+
+  // ── Get shipping label ────────────────────────────────────────────────────
+
+  async getShippingLabel(orderId: string) {
+    const order = await this.orderModel.findById(orderId).lean().exec();
+    if (!order) throw new NotFoundException('Order not found');
+    if (!order.shiprocketShipmentId)
+      throw new BadRequestException('Order not shipped via Shiprocket');
+
+    const result = await this.shiprocketService.generateLabel(order.shiprocketShipmentId);
+    return { labelUrl: result.label_url };
+  }
+
+  // ── Handle Shiprocket webhook status update ───────────────────────────────
+
+  async handleShiprocketWebhook(payload: any) {
+    const awb = payload.awb;
+    const status = payload.current_status?.toLowerCase();
+    if (!awb || !status) return;
+
+    const order = await this.orderModel.findOne({ awbCode: awb });
+    if (!order) return;
+
+    // Map Shiprocket status to our status
+    const statusMap: Record<string, OrderStatus> = {
+      'picked up': OrderStatus.SHIPPED,
+      'in transit': OrderStatus.SHIPPED,
+      'out for delivery': OrderStatus.SHIPPED,
+      delivered: OrderStatus.DELIVERED,
+      rto: OrderStatus.CANCELLED,
+    };
+
+    const mapped = statusMap[status];
+    if (!mapped || order.status === mapped) return;
+
+    // Only allow forward progression (don't go backwards)
+    const progression = [
+      OrderStatus.PENDING, OrderStatus.CONFIRMED, OrderStatus.PROCESSING,
+      OrderStatus.SHIPPED, OrderStatus.DELIVERED,
+    ];
+    const currentIdx = progression.indexOf(order.status);
+    const newIdx = progression.indexOf(mapped);
+    if (newIdx <= currentIdx && mapped !== OrderStatus.CANCELLED) return;
+
+    order.status = mapped;
+    await order.save();
+
+    const user = await this.userModel.findById(order.user);
+    if (user) {
+      this.emailService.sendOrderStatusUpdate({
+        customerName: user.name,
+        customerEmail: user.email,
+        orderId: (order._id as Types.ObjectId).toString(),
+        status: mapped,
+      });
+    }
+  }
+
+  private formatDate(date: Date): string {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    const h = String(date.getHours()).padStart(2, '0');
+    const min = String(date.getMinutes()).padStart(2, '0');
+    return `${y}-${m}-${d} ${h}:${min}`;
   }
 }

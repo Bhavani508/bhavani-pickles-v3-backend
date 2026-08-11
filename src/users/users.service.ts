@@ -147,6 +147,33 @@ export class UsersService {
     await user.save();
   }
 
+  async createEmailVerificationToken(userId: string): Promise<string> {
+    const token = crypto.randomBytes(32).toString('hex');
+    const expires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+    await this.userModel.findByIdAndUpdate(userId, {
+      emailVerificationToken: token,
+      emailVerificationExpires: expires,
+    });
+    return token;
+  }
+
+  async verifyEmail(token: string): Promise<UserDocument> {
+    const user = await this.userModel
+      .findOne({
+        emailVerificationToken: token,
+        emailVerificationExpires: { $gt: new Date() },
+      })
+      .select('+emailVerificationToken +emailVerificationExpires');
+
+    if (!user) throw new BadRequestException('Verification link is invalid or has expired');
+
+    user.isEmailVerified = true;
+    user.emailVerificationToken = undefined;
+    user.emailVerificationExpires = undefined;
+    await user.save();
+    return user;
+  }
+
   async getWishlist(userId: string) {
     const user = await this.userModel
       .findById(userId)

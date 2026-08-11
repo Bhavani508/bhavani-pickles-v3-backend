@@ -5,10 +5,15 @@ import {
   Patch,
   Param,
   Body,
+  Query,
+  Res,
   UseGuards,
+  ForbiddenException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { OrdersService } from './orders.service';
+import { InvoiceService } from './invoice.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { VerifyPaymentDto } from './dto/verify-payment.dto';
@@ -24,7 +29,10 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 @ApiBearerAuth()
 @Controller('orders')
 export class OrdersController {
-  constructor(private readonly ordersService: OrdersService) {}
+  constructor(
+    private readonly ordersService: OrdersService,
+    private readonly invoiceService: InvoiceService,
+  ) {}
 
   // Works for both guests and logged-in users
   @Post('initiate')
@@ -48,17 +56,85 @@ export class OrdersController {
     return this.ordersService.findByUser(userId);
   }
 
+  @Get('dashboard-stats')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  getDashboardStats() {
+    return this.ordersService.getDashboardStats();
+  }
+
   @Get()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
-  findAll() {
-    return this.ordersService.findAll();
+  findAll(
+    @Query('status') status?: string,
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+  ) {
+    return this.ordersService.findAll({ status, page, limit });
+  }
+
+  @Get('shipping-rates')
+  async getShippingRates(
+    @Query('pincode') pincode: string,
+    @Query('weight') weight?: string,
+    @Query('cod') cod?: string,
+  ) {
+    return this.ordersService.getShippingRates(pincode, Number(weight) || 0.5, cod === 'true');
+  }
+
+  @Get('track')
+  async trackGuestOrder(
+    @Query('orderId') orderId: string,
+    @Query('email') email: string,
+  ) {
+    return this.ordersService.trackGuestOrder(orderId, email);
+  }
+
+  @Get(':id/invoice')
+  @UseGuards(JwtAuthGuard)
+  async downloadInvoice(
+    @Param('id') id: string,
+    @CurrentUser('sub') userId: string,
+    @CurrentUser('role') role: string,
+    @Res() res: Response,
+  ) {
+    const order = await this.ordersService.findOne(id);
+    const orderUserId = (order.user as any)?._id?.toString() ?? order.user?.toString();
+    if (role !== 'admin' && orderUserId !== userId) {
+      res.status(403).json({ message: 'You can only download your own invoices' });
+      return;
+    }
+    const user = order.user as any;
+    const shortId = id.slice(-8).toUpperCase();
+
+    const doc = this.invoiceService.generateInvoice(
+      order,
+      user?.name ?? 'Customer',
+      user?.email ?? '',
+    );
+
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename=invoice-${shortId}.pdf`,
+    });
+
+    doc.pipe(res);
   }
 
   @Get(':id')
   @UseGuards(JwtAuthGuard)
-  findOne(@Param('id') id: string) {
-    return this.ordersService.findOne(id);
+  async findOne(
+    @Param('id') id: string,
+    @CurrentUser('sub') userId: string,
+    @CurrentUser('role') role: string,
+  ) {
+    const order = await this.ordersService.findOne(id);
+    const orderUserId = (order.user as any)?._id?.toString() ?? order.user?.toString();
+    if (role !== 'admin' && orderUserId !== userId) {
+      throw new ForbiddenException('You can only view your own orders');
+    }
+    return order;
   }
 
   // Both users (own orders) and admins can cancel
@@ -78,5 +154,25 @@ export class OrdersController {
   @Roles(Role.ADMIN)
   updateStatus(@Param('id') id: string, @Body() dto: UpdateOrderStatusDto) {
     return this.ordersService.updateStatus(id, dto);
+  }
+
+  @Post(':id/ship')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  shipOrder(@Param('id') id: string) {
+    return this.ordersService.shipOrder(id);
+  }
+
+  @Get(':id/tracking')
+  @UseGuards(JwtAuthGuard)
+  getTracking(@Param('id') id: string) {
+    return this.ordersService.getShipmentTracking(id);
+  }
+
+  @Get(':id/label')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  getLabel(@Param('id') id: string) {
+    return this.ordersService.getShippingLabel(id);
   }
 }

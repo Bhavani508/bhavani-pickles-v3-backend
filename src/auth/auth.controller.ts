@@ -1,5 +1,8 @@
-import { Controller, Post, Body, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Body, HttpCode, HttpStatus, Get, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -11,13 +14,17 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
+  // 5 registrations per minute per IP
   @Post('register')
+  @Throttle({ default: { ttl: 60000, limit: 5 } })
   @ApiOperation({ summary: 'Register a new user' })
   register(@Body() registerDto: RegisterDto) {
     return this.authService.register(registerDto);
   }
 
+  // 10 login attempts per minute per IP
   @Post('login')
+  @Throttle({ default: { ttl: 60000, limit: 10 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Login and get JWT tokens' })
   login(@Body() loginDto: LoginDto) {
@@ -31,7 +38,9 @@ export class AuthController {
     return this.authService.refreshToken(refreshToken);
   }
 
+  // 3 password reset requests per minute per IP
   @Post('forgot-password')
+  @Throttle({ default: { ttl: 60000, limit: 3 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Request a password reset email' })
   forgotPassword(@Body() dto: ForgotPasswordDto) {
@@ -40,12 +49,29 @@ export class AuthController {
     }));
   }
 
+  // 5 reset attempts per minute per IP
   @Post('reset-password')
+  @Throttle({ default: { ttl: 60000, limit: 5 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Reset password using token from email' })
   resetPassword(@Body() dto: ResetPasswordDto) {
     return this.authService.resetPassword(dto.token, dto.newPassword).then(() => ({
       message: 'Password reset successfully. Please log in.',
     }));
+  }
+
+  @Get('verify-email')
+  @ApiOperation({ summary: 'Verify email address using token' })
+  verifyEmail(@Query('token') token: string) {
+    return this.authService.verifyEmail(token);
+  }
+
+  @Post('resend-verification')
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { ttl: 60000, limit: 3 } })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Resend email verification link' })
+  resendVerification(@CurrentUser('sub') userId: string) {
+    return this.authService.resendVerification(userId);
   }
 }

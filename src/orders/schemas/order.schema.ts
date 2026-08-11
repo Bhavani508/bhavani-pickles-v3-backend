@@ -88,6 +88,25 @@ export class Order {
 
   @Prop()
   cancelledBy?: string; // 'user' or 'admin'
+
+  // Shiprocket shipping fields
+  @Prop()
+  shiprocketOrderId?: number;
+
+  @Prop()
+  shiprocketShipmentId?: number;
+
+  @Prop()
+  awbCode?: string;
+
+  @Prop()
+  courierName?: string;
+
+  @Prop()
+  trackingUrl?: string;
+
+  @Prop()
+  shippingLabelUrl?: string;
 }
 
 export const OrderSchema = SchemaFactory.createForClass(Order);
