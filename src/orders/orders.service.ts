@@ -330,7 +330,6 @@ export class OrdersService {
     OrderStatus.PENDING,
     OrderStatus.CONFIRMED,
     OrderStatus.PROCESSING,
-    OrderStatus.READY_TO_SHIP,
   ];
 
   async cancelOrder(
@@ -349,7 +348,7 @@ export class OrdersService {
 
     if (!OrdersService.CANCELLABLE_STATUSES.includes(order.status)) {
       throw new BadRequestException(
-        `Order cannot be cancelled — current status is "${order.status}". Only orders that are pending, confirmed, processing, or ready to ship can be cancelled.`,
+        `Order cannot be cancelled — current status is "${order.status}". Only orders that are pending, confirmed, or processing can be cancelled.`,
       );
     }
 

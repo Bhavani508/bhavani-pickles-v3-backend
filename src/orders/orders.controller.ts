@@ -156,13 +156,6 @@ export class OrdersController {
     return this.ordersService.updateStatus(id, dto);
   }
 
-  @Post(':id/ship')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN)
-  shipOrder(@Param('id') id: string) {
-    return this.ordersService.shipOrder(id);
-  }
-
   @Get(':id/tracking')
   @UseGuards(JwtAuthGuard)
   getTracking(@Param('id') id: string) {
