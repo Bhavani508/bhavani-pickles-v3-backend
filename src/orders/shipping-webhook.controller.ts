@@ -1,9 +1,11 @@
-import { Controller, Post, Body, Headers, HttpCode, Logger } from '@nestjs/common';
+import { Controller, Get, Post, Body, Headers, HttpCode, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ApiTags } from '@nestjs/swagger';
+import { SkipThrottle } from '@nestjs/throttler';
 import { OrdersService } from './orders.service';
 
 @ApiTags('webhooks')
+@SkipThrottle()
 @Controller('webhook/shiprocket')
 export class ShippingWebhookController {
   private readonly logger = new Logger(ShippingWebhookController.name);
@@ -12,6 +14,11 @@ export class ShippingWebhookController {
     private readonly ordersService: OrdersService,
     private readonly config: ConfigService,
   ) {}
+
+  @Get()
+  healthCheck() {
+    return { status: 'ok' };
+  }
 
   @Post()
   @HttpCode(200)
