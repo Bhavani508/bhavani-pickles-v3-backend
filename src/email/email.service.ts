@@ -74,6 +74,7 @@ export class EmailService {
       price: number;
     }>;
     totalAmount: number;
+    shippingCost?: number;
     shippingAddress: {
       street: string;
       city: string;
@@ -100,6 +101,7 @@ export class EmailService {
       price: number;
     }>;
     totalAmount: number;
+    shippingCost?: number;
     reason?: string;
     cancelledBy: string;
     refundInitiated?: boolean;

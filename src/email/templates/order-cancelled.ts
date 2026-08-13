@@ -10,6 +10,7 @@ interface OrderCancelledData {
     price: number;
   }>;
   totalAmount: number;
+  shippingCost?: number;
   reason?: string;
   cancelledBy: string;
   refundInitiated?: boolean;
@@ -61,8 +62,16 @@ export function orderCancelledTemplate(data: OrderCancelledData): string {
       </tr>
       ${itemRows}
       <tr>
-        <td colspan="2" style="padding:12px 0;text-align:right;font-weight:bold;font-size:15px;">Total:</td>
-        <td style="padding:12px 0;text-align:right;font-weight:bold;font-size:15px;color:#dc2626;text-decoration:line-through;">&#8377;${data.totalAmount.toFixed(2)}</td>
+        <td colspan="2" style="padding:8px 0;text-align:right;color:#888;font-size:14px;">Subtotal:</td>
+        <td style="padding:8px 0;text-align:right;color:#333;font-size:14px;">&#8377;${(data.totalAmount - (data.shippingCost ?? 0)).toFixed(2)}</td>
+      </tr>
+      <tr>
+        <td colspan="2" style="padding:4px 0;text-align:right;color:#888;font-size:14px;">Shipping:</td>
+        <td style="padding:4px 0;text-align:right;color:#333;font-size:14px;">${(data.shippingCost ?? 0) > 0 ? `&#8377;${(data.shippingCost!).toFixed(2)}` : 'Free'}</td>
+      </tr>
+      <tr>
+        <td colspan="2" style="padding:12px 0;text-align:right;font-weight:bold;font-size:15px;border-top:1px solid #e0e0e0;">Total:</td>
+        <td style="padding:12px 0;text-align:right;font-weight:bold;font-size:15px;color:#dc2626;text-decoration:line-through;border-top:1px solid #e0e0e0;">&#8377;${data.totalAmount.toFixed(2)}</td>
       </tr>
     </table>
 
