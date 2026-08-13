@@ -129,6 +129,9 @@ export class OrdersService {
       totalAmount = orderItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
     }
 
+    const shippingCost = dto.shippingCost ?? 0;
+    totalAmount += shippingCost;
+
     // ── COD: create confirmed order immediately ──────────────────────────────
     if (dto.paymentType === 'COD') {
       const order = await new this.orderModel({
@@ -136,6 +139,7 @@ export class OrdersService {
         items: orderItems,
         shippingAddress: dto.shippingAddress,
         totalAmount,
+        shippingCost,
         notes: dto.notes,
         paymentType: 'COD',
         status: OrderStatus.CONFIRMED,
@@ -151,6 +155,7 @@ export class OrdersService {
         orderId: (order._id as Types.ObjectId).toString(),
         items: orderItems,
         totalAmount,
+        shippingCost,
         shippingAddress: dto.shippingAddress,
         paymentType: 'COD',
       });
@@ -170,6 +175,7 @@ export class OrdersService {
       items: orderItems,
       shippingAddress: dto.shippingAddress,
       totalAmount,
+      shippingCost,
       notes: dto.notes,
       paymentType: 'online',
       status: OrderStatus.PENDING,
@@ -231,6 +237,7 @@ export class OrdersService {
           price: i.price,
         })),
         totalAmount: order.totalAmount,
+        shippingCost: (order as any).shippingCost ?? 0,
         shippingAddress: order.shippingAddress,
         paymentType: 'online',
       });
@@ -405,6 +412,7 @@ export class OrdersService {
           price: i.price,
         })),
         totalAmount: order.totalAmount,
+        shippingCost: (order as any).shippingCost ?? 0,
         reason: dto.reason,
         cancelledBy: order.cancelledBy!,
         refundInitiated,
@@ -478,6 +486,7 @@ export class OrdersService {
           price: i.price,
         })),
         totalAmount: order.totalAmount,
+        shippingCost: (order as any).shippingCost ?? 0,
         shippingAddress: order.shippingAddress,
         paymentType: 'online',
       });
