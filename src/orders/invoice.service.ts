@@ -179,10 +179,19 @@ export class InvoiceService {
     const totalBlockW = 180;
     let ty = rowY + 16;
 
+    const shippingCost = (order as any).shippingCost ?? 0;
+    const itemsSubtotal = order.totalAmount - shippingCost;
+
     // Subtotal
     doc.fontSize(8.5).font('Sans').fillColor(MUTED);
     doc.text('Subtotal', totalBlockX, ty, { width: 90 });
-    doc.fillColor(TEXT).text(`₹${order.totalAmount.toFixed(2)}`, totalBlockX + 90, ty, { width: 90, align: 'right' });
+    doc.fillColor(TEXT).text(`₹${itemsSubtotal.toFixed(2)}`, totalBlockX + 90, ty, { width: 90, align: 'right' });
+
+    // Shipping
+    ty += 16;
+    doc.fontSize(8.5).font('Sans').fillColor(MUTED);
+    doc.text('Shipping', totalBlockX, ty, { width: 90 });
+    doc.fillColor(TEXT).text(shippingCost > 0 ? `₹${shippingCost.toFixed(2)}` : 'Free', totalBlockX + 90, ty, { width: 90, align: 'right' });
 
     ty += 18;
     doc.moveTo(totalBlockX, ty).lineTo(totalBlockX + totalBlockW, ty).strokeColor(BORDER).lineWidth(0.5).stroke();

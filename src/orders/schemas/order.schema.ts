@@ -60,6 +60,9 @@ export class Order {
   @Prop({ required: true, min: 0 })
   totalAmount!: number;
 
+  @Prop({ default: 0, min: 0 })
+  shippingCost!: number;
+
   @Prop({ enum: OrderStatus, default: OrderStatus.PENDING })
   status!: OrderStatus;
 

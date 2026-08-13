@@ -54,6 +54,12 @@ export class CreateOrderDto {
   @IsString()
   notes?: string;
 
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  shippingCost?: number;
+
   @ApiProperty({ enum: ['COD', 'online'], default: 'online' })
   @IsIn(['COD', 'online'])
   paymentType: 'COD' | 'online';
